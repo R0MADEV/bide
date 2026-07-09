@@ -2,6 +2,7 @@ use bide::agents::{
     AgentRequest, AgentResponse, AgentRunner, AgentStep, ClaudeCodeAgent, Verdict,
 };
 use bide::cli::{parse, Command};
+use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{Dispatcher, StepHandler};
 use bide::tools::{Approver, CommandStep, ProcessShell};
 use bide::{run, Status, Step, Workflow};
@@ -36,9 +37,11 @@ fn run_task(task: &str) -> ExitCode {
     };
 
     println!("bide run: {task}\n");
+    let context = context_pack(task);
+    println!("context:\n{}\n", context.text);
     print_plan(&workflow);
 
-    let mut dispatcher = build_dispatcher(&workflow, task);
+    let mut dispatcher = build_dispatcher(&workflow, task, &context.text);
     let status = run(&workflow, &mut dispatcher);
 
     println!("\nfinished: {status:?}");
@@ -69,23 +72,48 @@ fn print_plan(workflow: &Workflow) {
     println!();
 }
 
-fn build_dispatcher(workflow: &Workflow, task: &str) -> Dispatcher {
+fn build_dispatcher(workflow: &Workflow, task: &str, context: &str) -> Dispatcher {
     let mut dispatcher = Dispatcher::new();
     for step in &workflow.steps {
-        dispatcher.register(&step.name, handler_for(step, task));
+        dispatcher.register(&step.name, handler_for(step, task, context));
     }
     dispatcher
 }
 
-fn handler_for(step: &Step, task: &str) -> Box<dyn StepHandler> {
+fn handler_for(step: &Step, task: &str, context: &str) -> Box<dyn StepHandler> {
     let Some(command) = &step.command else {
-        return Box::new(AgentStep::new(&step.name, task, make_agent()));
+        let input = format!("{task}\n\nRepository context:\n{context}");
+        return Box::new(AgentStep::new(&step.name, &input, make_agent()));
     };
     Box::new(CommandStep::new(
         command,
         Box::new(ProcessShell),
         Box::new(PromptApprover),
     ))
+}
+
+fn context_pack(task: &str) -> ContextPack {
+    let mut provider = context_provider();
+    build_context(provider.as_mut(), task)
+}
+
+/// Use Lexis for context when opted in, otherwise none. Keeps `bide run` working
+/// without Lexis installed.
+fn context_provider() -> Box<dyn CodeContext> {
+    let use_lexis = matches!(std::env::var("BIDE_CONTEXT").as_deref(), Ok("lexis"));
+    if use_lexis {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        return Box::new(LexisAsk::new(cwd));
+    }
+    Box::new(NoContext)
+}
+
+struct NoContext;
+
+impl CodeContext for NoContext {
+    fn lookup(&mut self, _task: &str) -> String {
+        String::new()
+    }
 }
 
 /// Use the real Claude Code driver when opted in, otherwise the stub. The

@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod cli;
 pub mod config;
+pub mod context;
 pub mod core;
 pub mod dispatch;
 pub mod policy;
