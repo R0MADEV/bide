@@ -1,0 +1,15 @@
+[package]
+name = "bide"
+version = "0.0.1"
+description = "Deterministic workflow engine that consults specialized agents when it needs judgement"
+edition = "2021"
+
+[lib]
+name = "bide"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bide"
+path = "src/main.rs"
+
+[dependencies]

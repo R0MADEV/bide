@@ -1,0 +1,11 @@
+# bide configuration. Copy to bide.toml and adjust.
+
+[workflow]
+# Retries allowed after failing checks before the task is marked Failed.
+max_retries = 2
+
+[tools]
+# External tools bide drives. bide never runs code itself.
+lexis = "lexis"
+signal = "signal"
+claude_code = "claude"
