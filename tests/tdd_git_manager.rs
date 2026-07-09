@@ -1,4 +1,4 @@
-use bide::git::{branch_name, parse_status};
+use bide::git::{branch_name, commit_message, parse_status};
 
 #[test]
 fn an_empty_status_is_a_clean_tree() {
@@ -22,4 +22,9 @@ fn a_task_becomes_a_slugged_branch_name() {
 #[test]
 fn branch_names_collapse_repeated_separators() {
     assert_eq!(branch_name("  fix:  login   redirect "), "bide/fix-login-redirect");
+}
+
+#[test]
+fn commit_message_prefixes_the_task() {
+    assert_eq!(commit_message("  add jwt auth  "), "bide: add jwt auth");
 }

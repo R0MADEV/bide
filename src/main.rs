@@ -6,7 +6,7 @@ use bide::cli::{parse, Command};
 use bide::config::{AgentSettings, Provider};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{Dispatcher, StepHandler};
-use bide::git::{branch_name, Git, GitCli};
+use bide::git::{branch_name, commit_message, Git, GitCli};
 use bide::report::{save, RunRecord};
 use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, ProcessShell};
 use bide::{run, Status, Step, Workflow};
@@ -102,11 +102,16 @@ fn finalize_branch(task: &str, clean_at_start: bool, diff: &str) {
         return;
     }
     let name = branch_name(task);
-    if GitCli.create_branch(&name) {
-        println!("branch: created {name} with the run's changes");
+    let mut git = GitCli;
+    if !git.create_branch(&name) {
+        println!("branch: could not create {name}");
         return;
     }
-    println!("branch: could not create {name}");
+    if git.commit_all(&commit_message(task)) {
+        println!("branch: created {name} and committed the run's changes");
+        return;
+    }
+    println!("branch: created {name} (nothing committed)");
 }
 
 fn git_state() -> String {
