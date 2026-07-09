@@ -5,6 +5,7 @@ fn sample() -> RunRecord {
     RunRecord {
         task: "add jwt".to_string(),
         status: Status::Failed,
+        diff: "diff --git a/src/auth.rs b/src/auth.rs".to_string(),
         steps: vec![
             StepRecord {
                 name: "plan".to_string(),
@@ -28,6 +29,13 @@ fn report_includes_task_status_steps_and_outputs() {
     assert!(markdown.contains("plan"));
     assert!(markdown.contains("verify"));
     assert!(markdown.contains("the plan body"));
+}
+
+#[test]
+fn report_includes_the_diff_when_present() {
+    let markdown = render(&sample());
+    assert!(markdown.contains("## Diff"));
+    assert!(markdown.contains("diff --git a/src/auth.rs"));
 }
 
 #[test]

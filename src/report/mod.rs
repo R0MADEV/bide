@@ -16,6 +16,7 @@ pub struct RunRecord {
     pub task: String,
     pub steps: Vec<StepRecord>,
     pub status: Status,
+    pub diff: String,
 }
 
 pub fn render(record: &RunRecord) -> String {
@@ -30,6 +31,10 @@ pub fn render(record: &RunRecord) -> String {
         if !step.output.trim().is_empty() {
             let _ = writeln!(out, "\n```\n{}\n```\n", step.output.trim());
         }
+    }
+
+    if !record.diff.trim().is_empty() {
+        let _ = writeln!(out, "## Diff\n\n```diff\n{}\n```", record.diff.trim());
     }
     out
 }

@@ -64,6 +64,7 @@ fn run_task(task: &str) -> ExitCode {
         task: task.to_string(),
         steps: dispatcher.into_records(),
         status,
+        diff: GitCli.diff(),
     };
     record_run(&record);
 
