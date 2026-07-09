@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod context;
 pub mod core;
+pub mod git;
 pub mod dispatch;
 pub mod policy;
 pub mod report;

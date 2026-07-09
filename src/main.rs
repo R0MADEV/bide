@@ -6,6 +6,7 @@ use bide::cli::{parse, Command};
 use bide::config::{AgentSettings, Provider};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{Dispatcher, StepHandler};
+use bide::git::{Git, GitCli};
 use bide::report::{save, RunRecord};
 use bide::tools::{Approver, CommandStep, ProcessShell};
 use bide::{run, Status, Step, Workflow};
@@ -49,7 +50,8 @@ fn run_task(task: &str) -> ExitCode {
     };
 
     println!("bide run: {task}");
-    println!("agent: {}\n", agent.label());
+    println!("agent: {}", agent.label());
+    println!("git: {}\n", git_state());
     let context = context_pack(task);
     println!("context:\n{}\n", context.text);
     print_plan(&workflow);
@@ -76,6 +78,18 @@ fn record_run(record: &RunRecord) {
         Ok(path) => println!("report: {}", path.display()),
         Err(error) => eprintln!("warning: could not write run report: {error}"),
     }
+}
+
+fn git_state() -> String {
+    let mut git = GitCli;
+    let Some(branch) = git.current_branch() else {
+        return "not a git repository".to_string();
+    };
+    let status = git.status();
+    if status.clean {
+        return format!("{branch} (clean)");
+    }
+    format!("{branch} ({} changed)", status.changed_files.len())
 }
 
 fn run_id() -> String {
