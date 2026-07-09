@@ -1,4 +1,4 @@
-use bide::git::{branch_name, commit_message, parse_status};
+use bide::git::{branch_name, commit_message, parse_status, pr_title};
 
 #[test]
 fn an_empty_status_is_a_clean_tree() {
@@ -27,4 +27,10 @@ fn branch_names_collapse_repeated_separators() {
 #[test]
 fn commit_message_prefixes_the_task() {
     assert_eq!(commit_message("  add jwt auth  "), "bide: add jwt auth");
+}
+
+#[test]
+fn pr_title_capitalises_the_task() {
+    assert_eq!(pr_title("add jwt auth"), "Add jwt auth");
+    assert_eq!(pr_title(""), "");
 }

@@ -12,6 +12,7 @@ pub trait Git {
     fn current_branch(&mut self) -> Option<String>;
     fn create_branch(&mut self, name: &str) -> bool;
     fn commit_all(&mut self, message: &str) -> bool;
+    fn push(&mut self, branch: &str) -> bool;
     fn diff(&mut self) -> String;
 }
 
@@ -29,6 +30,14 @@ pub fn parse_status(porcelain: &str) -> GitStatus {
 
 pub fn commit_message(task: &str) -> String {
     format!("bide: {}", task.trim())
+}
+
+pub fn pr_title(task: &str) -> String {
+    let mut chars = task.trim().chars();
+    match chars.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+        None => String::new(),
+    }
 }
 
 pub fn branch_name(task: &str) -> String {
@@ -64,6 +73,10 @@ impl Git for GitCli {
 
     fn commit_all(&mut self, message: &str) -> bool {
         run_git(&["add", "-A"]).is_some() && run_git(&["commit", "-m", message]).is_some()
+    }
+
+    fn push(&mut self, branch: &str) -> bool {
+        run_git(&["push", "-u", "origin", branch]).is_some()
     }
 
     fn diff(&mut self) -> String {

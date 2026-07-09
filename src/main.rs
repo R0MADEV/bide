@@ -7,12 +7,12 @@ use bide::config::{AgentSettings, Provider};
 use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{Dispatcher, StepHandler};
-use bide::git::{branch_name, commit_message, Git, GitCli};
+use bide::git::{branch_name, commit_message, pr_title, Git, GitCli};
 use bide::report::{save, RunRecord};
 use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, ProcessShell};
 use bide::{run, Status, Step, Workflow};
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -41,6 +41,7 @@ fn doctor() -> ExitCode {
         tool_check("git", tool_present("git"), true),
         tool_check("claude", tool_present("claude"), false),
         tool_check("lexis", tool_present("lexis"), false),
+        tool_check("gh", tool_present("gh"), false),
         config_check(config_state()),
     ];
 
@@ -107,14 +108,15 @@ fn run_task(task: &str) -> ExitCode {
 
     println!("\nfinished: {status:?}");
     let diff = GitCli.diff();
-    finalize_branch(task, clean_at_start, &diff);
+    let branch = finalize_branch(task, clean_at_start, &diff);
     let record = RunRecord {
         task: task.to_string(),
         steps: dispatcher.into_records(),
         status,
         diff,
     };
-    record_run(&record);
+    let report_path = record_run(&record);
+    maybe_open_pr(branch.as_deref(), task, report_path.as_deref());
 
     match status {
         Status::Accepted => ExitCode::SUCCESS,
@@ -122,40 +124,81 @@ fn run_task(task: &str) -> ExitCode {
     }
 }
 
-fn record_run(record: &RunRecord) {
+fn record_run(record: &RunRecord) -> Option<PathBuf> {
     match save(record, Path::new(RUNS_DIR), &run_id()) {
-        Ok(path) => println!("report: {}", path.display()),
-        Err(error) => eprintln!("warning: could not write run report: {error}"),
+        Ok(path) => {
+            println!("report: {}", path.display());
+            Some(path)
+        }
+        Err(error) => {
+            eprintln!("warning: could not write run report: {error}");
+            None
+        }
     }
 }
 
 /// After a run, move the changes it produced onto a task branch when opted in
 /// (BIDE_BRANCH=1). Only when the tree was clean at the start (so the changes
 /// are the run's) and the run actually produced a diff — no empty branches.
-fn finalize_branch(task: &str, clean_at_start: bool, diff: &str) {
+fn finalize_branch(task: &str, clean_at_start: bool, diff: &str) -> Option<String> {
     let opted_in = matches!(std::env::var("BIDE_BRANCH").as_deref(), Ok("1"));
     if !opted_in {
-        return;
+        return None;
     }
     if !clean_at_start {
         println!("branch: skipped (working tree was not clean at start)");
-        return;
+        return None;
     }
     if diff.trim().is_empty() {
         println!("branch: skipped (run produced no changes)");
-        return;
+        return None;
     }
     let name = branch_name(task);
     let mut git = GitCli;
     if !git.create_branch(&name) {
         println!("branch: could not create {name}");
+        return None;
+    }
+    if !git.commit_all(&commit_message(task)) {
+        println!("branch: created {name} (nothing committed)");
+        return None;
+    }
+    println!("branch: created {name} and committed the run's changes");
+    Some(name)
+}
+
+/// Push the task branch and open a PR when opted in (BIDE_PR=1). Uses the run
+/// report as the PR body.
+fn maybe_open_pr(branch: Option<&str>, task: &str, report: Option<&Path>) {
+    if !matches!(std::env::var("BIDE_PR").as_deref(), Ok("1")) {
         return;
     }
-    if git.commit_all(&commit_message(task)) {
-        println!("branch: created {name} and committed the run's changes");
+    let Some(branch) = branch else {
+        println!("pr: skipped (no committed branch)");
+        return;
+    };
+    if !GitCli.push(branch) {
+        println!("pr: could not push {branch}");
         return;
     }
-    println!("branch: created {name} (nothing committed)");
+    if open_pr(&pr_title(task), report) {
+        println!("pr: opened for {branch}");
+        return;
+    }
+    println!("pr: could not open PR (is gh installed and authenticated?)");
+}
+
+fn open_pr(title: &str, report: Option<&Path>) -> bool {
+    let mut command = Process::new("gh");
+    command.arg("pr").arg("create").arg("--title").arg(title);
+    match report {
+        Some(path) => command.arg("--body-file").arg(path),
+        None => command.arg("--body").arg("Opened by bide."),
+    };
+    command
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn git_state() -> String {
