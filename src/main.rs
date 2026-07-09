@@ -6,7 +6,7 @@ use bide::cli::{parse, Command};
 use bide::config::{AgentSettings, Provider};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{Dispatcher, StepHandler};
-use bide::git::{Git, GitCli};
+use bide::git::{branch_name, Git, GitCli};
 use bide::report::{save, RunRecord};
 use bide::tools::{Approver, CommandStep, ProcessShell};
 use bide::{run, Status, Step, Workflow};
@@ -52,6 +52,7 @@ fn run_task(task: &str) -> ExitCode {
     println!("bide run: {task}");
     println!("agent: {}", agent.label());
     println!("git: {}\n", git_state());
+    let clean_at_start = GitCli.status().clean;
     let context = context_pack(task);
     println!("context:\n{}\n", context.text);
     print_plan(&workflow);
@@ -60,11 +61,13 @@ fn run_task(task: &str) -> ExitCode {
     let status = run(&workflow, &mut dispatcher);
 
     println!("\nfinished: {status:?}");
+    let diff = GitCli.diff();
+    finalize_branch(task, clean_at_start, &diff);
     let record = RunRecord {
         task: task.to_string(),
         steps: dispatcher.into_records(),
         status,
-        diff: GitCli.diff(),
+        diff,
     };
     record_run(&record);
 
@@ -79,6 +82,30 @@ fn record_run(record: &RunRecord) {
         Ok(path) => println!("report: {}", path.display()),
         Err(error) => eprintln!("warning: could not write run report: {error}"),
     }
+}
+
+/// After a run, move the changes it produced onto a task branch when opted in
+/// (BIDE_BRANCH=1). Only when the tree was clean at the start (so the changes
+/// are the run's) and the run actually produced a diff — no empty branches.
+fn finalize_branch(task: &str, clean_at_start: bool, diff: &str) {
+    let opted_in = matches!(std::env::var("BIDE_BRANCH").as_deref(), Ok("1"));
+    if !opted_in {
+        return;
+    }
+    if !clean_at_start {
+        println!("branch: skipped (working tree was not clean at start)");
+        return;
+    }
+    if diff.trim().is_empty() {
+        println!("branch: skipped (run produced no changes)");
+        return;
+    }
+    let name = branch_name(task);
+    if GitCli.create_branch(&name) {
+        println!("branch: created {name} with the run's changes");
+        return;
+    }
+    println!("branch: could not create {name}");
 }
 
 fn git_state() -> String {
