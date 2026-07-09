@@ -1,3 +1,4 @@
 /target
+/bide.toml
 .bide/runs/
 .DS_Store

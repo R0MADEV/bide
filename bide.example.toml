@@ -1,11 +1,27 @@
 # bide configuration. Copy to bide.toml and adjust.
+# The workflow is a composable list of steps the engine walks in order.
 
 [workflow]
-# Retries allowed after failing checks before the task is marked Failed.
+# Retries allowed for a retry_from step before the run is marked Failed.
 max_retries = 2
 
-[tools]
-# External tools bide drives. bide never runs code itself.
-lexis = "lexis"
-signal = "signal"
-claude_code = "claude"
+[[workflow.step]]
+name = "build_context"
+on_failure = "abort"
+
+[[workflow.step]]
+name = "plan"
+on_failure = "abort"
+
+[[workflow.step]]
+name = "implement"
+on_failure = "abort"
+
+[[workflow.step]]
+name = "verify"
+# On failure, jump back to "implement" and try again (bounded by max_retries).
+on_failure = { retry_from = "implement" }
+
+[[workflow.step]]
+name = "review"
+on_failure = "abort"

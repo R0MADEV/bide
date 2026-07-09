@@ -1,6 +1,9 @@
 use bide::cli::{parse, Command};
 use bide::{run, Status, Step, StepOutcome, StepRunner, Workflow};
+use std::path::Path;
 use std::process::ExitCode;
+
+const CONFIG_PATH: &str = "bide.toml";
 
 fn main() -> ExitCode {
     let command = match parse(std::env::args().skip(1)) {
@@ -18,9 +21,15 @@ fn main() -> ExitCode {
 }
 
 fn run_task(task: &str) -> ExitCode {
-    println!("bide run: {task}\n");
+    let workflow = match resolve_workflow() {
+        Ok(workflow) => workflow,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(2);
+        }
+    };
 
-    let workflow = Workflow::default_recipe();
+    println!("bide run: {task}\n");
     let status = run(&workflow, &mut StubRunner);
 
     println!("\nfinished: {status:?}");
@@ -28,6 +37,16 @@ fn run_task(task: &str) -> ExitCode {
         Status::Accepted => ExitCode::SUCCESS,
         _ => ExitCode::FAILURE,
     }
+}
+
+/// Load the recipe from bide.toml when present, otherwise use the default. A
+/// present-but-invalid config is a hard error, not a silent fallback.
+fn resolve_workflow() -> Result<Workflow, String> {
+    let path = Path::new(CONFIG_PATH);
+    if !path.exists() {
+        return Ok(Workflow::default_recipe());
+    }
+    bide::config::load(path).map_err(|error| format!("invalid {CONFIG_PATH}: {error}"))
 }
 
 /// Placeholder runner: reports every step as done so the end-to-end loop is
