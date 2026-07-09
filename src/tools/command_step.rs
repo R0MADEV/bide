@@ -1,4 +1,5 @@
 use super::{run_guarded, Approver, CommandOutcome, Shell};
+use crate::board::Blackboard;
 use crate::core::{Step, StepOutcome};
 use crate::dispatch::{StepHandler, StepReport};
 use crate::policy::Policy;
@@ -25,7 +26,7 @@ impl CommandStep {
 }
 
 impl StepHandler for CommandStep {
-    fn handle(&mut self, _step: &Step) -> StepReport {
+    fn handle(&mut self, _step: &Step, _board: &Blackboard) -> StepReport {
         let outcome = run_guarded(
             &self.policy,
             self.approver.as_mut(),

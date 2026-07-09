@@ -1,3 +1,4 @@
+use crate::board::Blackboard;
 use crate::core::{Step, StepOutcome, StepRunner};
 use crate::report::StepRecord;
 use std::collections::HashMap;
@@ -18,18 +19,19 @@ impl StepReport {
     }
 }
 
-/// Does the actual work for one step. Handlers are the seam where real tools
-/// (context, agents, verification) plug into the engine.
+/// Does the actual work for one step. Handlers read shared state from the
+/// blackboard and are the seam where real tools plug into the engine.
 pub trait StepHandler {
-    fn handle(&mut self, step: &Step) -> StepReport;
+    fn handle(&mut self, step: &Step, board: &Blackboard) -> StepReport;
 }
 
-/// Routes each step to the handler registered under its name and records what
-/// every step produced so the run can be persisted afterwards.
+/// Routes each step to the handler registered under its name, feeds it the
+/// shared blackboard, and records what every step produced.
 #[derive(Default)]
 pub struct Dispatcher {
     handlers: HashMap<String, Box<dyn StepHandler>>,
     records: Vec<StepRecord>,
+    board: Blackboard,
 }
 
 impl Dispatcher {
@@ -50,10 +52,11 @@ impl Dispatcher {
 impl StepRunner for Dispatcher {
     fn run(&mut self, step: &Step) -> StepOutcome {
         let report = match self.handlers.get_mut(&step.name) {
-            Some(handler) => handler.handle(step),
+            Some(handler) => handler.handle(step, &self.board),
             None => StepReport::new(StepOutcome::Failure, "no handler registered"),
         };
 
+        self.board.record(&step.name, &report.output);
         self.records.push(StepRecord {
             name: step.name.clone(),
             outcome: report.outcome,

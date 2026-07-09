@@ -1,10 +1,11 @@
+use bide::board::Blackboard;
 use bide::dispatch::{Dispatcher, StepHandler, StepReport};
 use bide::{run, Status, Step, StepOutcome, StepRunner, Workflow};
 
 struct Fixed(StepOutcome);
 
 impl StepHandler for Fixed {
-    fn handle(&mut self, _step: &Step) -> StepReport {
+    fn handle(&mut self, _step: &Step, _board: &Blackboard) -> StepReport {
         StepReport::new(self.0, "")
     }
 }

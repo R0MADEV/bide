@@ -1,4 +1,5 @@
 use super::{AgentRequest, AgentRunner, Verdict};
+use crate::board::Blackboard;
 use crate::core::{Step, StepOutcome};
 use crate::dispatch::{StepHandler, StepReport};
 
@@ -23,13 +24,20 @@ impl AgentStep {
     pub fn role(&self) -> &str {
         &self.role
     }
+
+    fn input_with(&self, board: &Blackboard) -> String {
+        if board.is_empty() {
+            return self.input.clone();
+        }
+        format!("{}\n\nPrior steps:\n{}", self.input, board.summary())
+    }
 }
 
 impl StepHandler for AgentStep {
-    fn handle(&mut self, _step: &Step) -> StepReport {
+    fn handle(&mut self, _step: &Step, board: &Blackboard) -> StepReport {
         let request = AgentRequest {
             role: self.role.clone(),
-            input: self.input.clone(),
+            input: self.input_with(board),
         };
         let response = self.runner.run(&request);
         let outcome = match response.verdict {
