@@ -8,7 +8,7 @@ use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{Dispatcher, StepHandler};
 use bide::git::{branch_name, Git, GitCli};
 use bide::report::{save, RunRecord};
-use bide::tools::{Approver, CommandStep, ProcessShell};
+use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, ProcessShell};
 use bide::{run, Status, Step, Workflow};
 use std::io::{self, Write};
 use std::path::Path;
@@ -17,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const CONFIG_PATH: &str = "bide.toml";
 const RUNS_DIR: &str = ".bide/runs";
+const IMPLEMENT_STEP: &str = "implement";
 
 fn main() -> ExitCode {
     let command = match parse(std::env::args().skip(1)) {
@@ -163,15 +164,24 @@ fn build_dispatcher(
 }
 
 fn handler_for(step: &Step, task: &str, context: &str, agent: &AgentKind) -> Box<dyn StepHandler> {
-    let Some(command) = &step.command else {
-        let input = format!("{task}\n\nRepository context:\n{context}");
-        return Box::new(AgentStep::new(&step.name, &input, agent.build()));
-    };
-    Box::new(CommandStep::new(
-        command,
-        Box::new(ProcessShell),
-        Box::new(PromptApprover),
-    ))
+    if let Some(command) = &step.command {
+        return Box::new(CommandStep::new(
+            command,
+            Box::new(ProcessShell),
+            Box::new(PromptApprover),
+        ));
+    }
+    if is_implement_step(step, agent) {
+        return Box::new(ImplementStep::new(task, Box::new(ClaudeCodeImplementer)));
+    }
+    let input = format!("{task}\n\nRepository context:\n{context}");
+    Box::new(AgentStep::new(&step.name, &input, agent.build()))
+}
+
+/// The implement step edits the repo through Claude Code — only when real agents
+/// are opted in, so a stub run never tries to change files.
+fn is_implement_step(step: &Step, agent: &AgentKind) -> bool {
+    step.name == IMPLEMENT_STEP && !agent.is_stub()
 }
 
 fn context_pack(task: &str) -> ContextPack {
@@ -219,6 +229,10 @@ impl AgentKind {
                 }
             },
         }
+    }
+
+    fn is_stub(&self) -> bool {
+        matches!(self, AgentKind::Stub)
     }
 
     fn label(&self) -> String {
