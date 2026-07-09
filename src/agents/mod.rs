@@ -1,6 +1,7 @@
 mod agent_step;
 mod anthropic;
 mod claude_code;
+mod http;
 mod openai;
 mod protocol;
 

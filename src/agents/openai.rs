@@ -1,3 +1,4 @@
+use super::http::send_and_extract;
 use super::protocol::{build_prompt, response_from};
 use super::{AgentRequest, AgentResponse, AgentRunner};
 use reqwest::blocking::Client;
@@ -22,26 +23,12 @@ impl OpenAiAgent {
     }
 
     fn call(&self, prompt: &str) -> (bool, String) {
-        let response = self
+        let request = self
             .client
             .post(ENDPOINT)
             .bearer_auth(&self.api_key)
-            .json(&build_request_body(&self.model, prompt))
-            .send();
-
-        let Ok(response) = response else {
-            return (false, String::new());
-        };
-        if !response.status().is_success() {
-            return (false, String::new());
-        }
-        let Ok(text) = response.text() else {
-            return (false, String::new());
-        };
-        match extract_content(&text) {
-            Some(content) => (true, content),
-            None => (false, String::new()),
-        }
+            .json(&build_request_body(&self.model, prompt));
+        send_and_extract(request, extract_content)
     }
 }
 
