@@ -6,7 +6,7 @@ use bide::cli::{parse, Command};
 use bide::config::{AgentSettings, Provider};
 use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
-use bide::dispatch::{Dispatcher, StepHandler};
+use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, StepHandler, StepReport};
 use bide::git::{branch_name, commit_message, pr_title, Git, GitCli};
 use bide::report::{save, RunRecord};
 use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, ProcessShell};
@@ -104,6 +104,7 @@ fn run_task(task: &str) -> ExitCode {
     print_plan(&workflow);
 
     let mut dispatcher = build_dispatcher(&workflow, task, &context.text, &agent);
+    dispatcher.set_gate(make_gate());
     let status = run(&workflow, &mut dispatcher);
 
     println!("\nfinished: {status:?}");
@@ -375,6 +376,38 @@ impl AgentRunner for StubAgent {
         AgentResponse {
             output: format!("(stub {} for: {})", request.role, request.input),
             verdict: Verdict::Proceed,
+        }
+    }
+}
+
+/// Interactive by default; BIDE_YES=1 runs straight through without stopping.
+fn make_gate() -> Box<dyn Gate> {
+    let auto = matches!(std::env::var("BIDE_YES").as_deref(), Ok("1"));
+    if auto {
+        return Box::new(AutoGate);
+    }
+    Box::new(PromptGate)
+}
+
+/// Stops at a checkpoint step, shows what it produced, and lets the user
+/// continue, retry the step, or abort the run.
+struct PromptGate;
+
+impl Gate for PromptGate {
+    fn checkpoint(&mut self, step: &Step, report: &StepReport) -> Control {
+        println!("\n── checkpoint: {} [{:?}] ──", step.name, report.outcome);
+        println!("{}", report.output.trim());
+        print!("continue / retry / abort? [C/r/a] ");
+        let _ = io::stdout().flush();
+
+        let mut answer = String::new();
+        if io::stdin().read_line(&mut answer).is_err() {
+            return Control::Abort;
+        }
+        match answer.trim() {
+            "r" | "retry" => Control::Retry,
+            "a" | "abort" => Control::Abort,
+            _ => Control::Continue,
         }
     }
 }

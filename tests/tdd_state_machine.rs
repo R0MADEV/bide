@@ -31,6 +31,13 @@ fn success_on_the_last_step_accepts() {
 }
 
 #[test]
+fn an_aborted_outcome_is_terminal() {
+    let workflow = two_step_with_retry();
+    let mut task = Task::new();
+    assert_eq!(task.advance(&workflow, Aborted), Status::Aborted);
+}
+
+#[test]
 fn abort_on_failure_fails_immediately() {
     let workflow = Workflow {
         steps: vec![Step::abort("only")],

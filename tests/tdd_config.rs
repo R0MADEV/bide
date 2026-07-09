@@ -88,6 +88,22 @@ fn parses_an_optional_command_on_a_step() {
 }
 
 #[test]
+fn parses_a_pause_checkpoint_on_a_step() {
+    let input = r#"
+        [workflow]
+        max_retries = 0
+
+        [[workflow.step]]
+        name = "plan"
+        on_failure = "abort"
+        pause = true
+    "#;
+
+    let workflow = parse(input).expect("valid recipe");
+    assert!(workflow.steps[0].pause);
+}
+
+#[test]
 fn rejects_retry_from_an_unknown_step() {
     let input = r#"
         [workflow]

@@ -21,6 +21,8 @@ struct StepConfig {
     on_failure: OnFailureConfig,
     #[serde(default)]
     command: Option<String>,
+    #[serde(default)]
+    pause: bool,
 }
 
 #[derive(Deserialize)]
@@ -53,6 +55,7 @@ pub(super) fn to_workflow(root: Root) -> Result<Workflow, ConfigError> {
             name: s.name,
             on_failure,
             command: s.command,
+            pause: s.pause,
         })
         .collect();
 

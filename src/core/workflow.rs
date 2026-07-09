@@ -10,6 +10,7 @@ pub struct Step {
     pub name: String,
     pub on_failure: OnFailure,
     pub command: Option<String>,
+    pub pause: bool,
 }
 
 impl Step {
@@ -18,6 +19,7 @@ impl Step {
             name: name.to_string(),
             on_failure: OnFailure::Abort,
             command: None,
+            pause: false,
         }
     }
 
@@ -26,6 +28,7 @@ impl Step {
             name: name.to_string(),
             on_failure: OnFailure::RetryFrom(step),
             command: None,
+            pause: false,
         }
     }
 

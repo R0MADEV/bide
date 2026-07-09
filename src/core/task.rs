@@ -21,6 +21,9 @@ impl Task {
     }
 
     pub fn advance(&mut self, workflow: &Workflow, outcome: StepOutcome) -> Status {
+        if outcome == StepOutcome::Aborted {
+            return Status::Aborted;
+        }
         if outcome == StepOutcome::Success {
             return self.on_success(workflow);
         }

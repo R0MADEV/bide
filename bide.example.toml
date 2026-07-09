@@ -21,6 +21,9 @@ on_failure = "abort"
 [[workflow.step]]
 name = "plan"
 on_failure = "abort"
+# A checkpoint: bide stops here after the step so you can review it and
+# choose to continue, retry or abort. Run with BIDE_YES=1 to skip all stops.
+pause = true
 
 [[workflow.step]]
 name = "implement"
