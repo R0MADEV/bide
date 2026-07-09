@@ -4,6 +4,7 @@ use bide::agents::{
 };
 use bide::cli::{parse, Command};
 use bide::config::{AgentSettings, Provider};
+use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{Dispatcher, StepHandler};
 use bide::git::{branch_name, commit_message, Git, GitCli};
@@ -12,7 +13,7 @@ use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, P
 use bide::{run, Status, Step, Workflow};
 use std::io::{self, Write};
 use std::path::Path;
-use std::process::ExitCode;
+use std::process::{Command as Process, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CONFIG_PATH: &str = "bide.toml";
@@ -31,6 +32,49 @@ fn main() -> ExitCode {
 
     match command {
         Command::Run { task } => run_task(&task),
+        Command::Doctor => doctor(),
+    }
+}
+
+fn doctor() -> ExitCode {
+    let checks = vec![
+        tool_check("git", tool_present("git"), true),
+        tool_check("claude", tool_present("claude"), false),
+        tool_check("lexis", tool_present("lexis"), false),
+        config_check(config_state()),
+    ];
+
+    for check in &checks {
+        let mark = match check.level {
+            Level::Ok => "ok  ",
+            Level::Warn => "warn",
+            Level::Fail => "FAIL",
+        };
+        println!("[{mark}] {} — {}", check.name, check.detail);
+    }
+
+    if is_healthy(&checks) {
+        return ExitCode::SUCCESS;
+    }
+    ExitCode::from(1)
+}
+
+fn tool_present(name: &str) -> bool {
+    Process::new(name)
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn config_state() -> ConfigState {
+    let path = Path::new(CONFIG_PATH);
+    if !path.exists() {
+        return ConfigState::Missing;
+    }
+    match bide::config::load(path) {
+        Ok(_) => ConfigState::Valid,
+        Err(error) => ConfigState::Invalid(error.to_string()),
     }
 }
 

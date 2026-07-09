@@ -20,6 +20,11 @@ fn parses_run_with_task_description() {
 }
 
 #[test]
+fn parses_the_doctor_command() {
+    assert_eq!(parse(args(&["doctor"])).unwrap(), Command::Doctor);
+}
+
+#[test]
 fn run_requires_a_task_description() {
     assert!(parse(args(&["run"])).is_err());
 }
