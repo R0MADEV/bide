@@ -1,14 +1,39 @@
 use super::{AgentResponse, Verdict};
 
+const VERDICT_CONTRACT: &str = "End your reply with exactly one line: \
+    `VERDICT: PROCEED` if the workflow should continue, or \
+    `VERDICT: REJECT: <reason>` if it should not.";
+
 /// The shared prompt + verdict contract used by every AgentRunner, whatever the
-/// backend (Claude CLI, OpenAI, Anthropic API).
+/// backend (Claude CLI, OpenAI, Anthropic API). The instructions are tailored to
+/// the step's role.
 pub fn build_prompt(role: &str, input: &str) -> String {
     format!(
-        "You are the {role} agent in the bide workflow. \
-         Do the {role} job for the task below, then end your reply with exactly \
-         one line: `VERDICT: PROCEED` if the workflow should continue, or \
-         `VERDICT: REJECT: <reason>` if it should not.\n\nTask: {input}\n"
+        "You are the {role} agent in the bide workflow. {}\n\n{VERDICT_CONTRACT}\n\nTask: {input}\n",
+        role_instruction(role)
     )
+}
+
+fn role_instruction(role: &str) -> &'static str {
+    match role {
+        "plan" | "planner" => {
+            "Produce a concrete, minimal plan: the steps to take, the files likely touched, \
+             the checks to run and the risks. Prefer the simplest approach that works."
+        }
+        "critic" => {
+            "Critique the plan on the blackboard: find errors, risks, over-engineering and \
+             architecture violations. Reject it if it is unsound."
+        }
+        "review" | "reviewer" => {
+            "Evaluate the changes against the plan: correctness, quality, architecture and \
+             maintainability. Reject them if they are not good enough."
+        }
+        "fix_plan" | "fix_planner" => {
+            "Read the failure output on the blackboard and propose a concrete, minimal repair \
+             strategy. Do not implement it, only recommend."
+        }
+        _ => "Do your job for the task below.",
+    }
 }
 
 pub(crate) fn response_from(success: bool, output: String) -> AgentResponse {
