@@ -1,5 +1,7 @@
+mod command_step;
 mod process;
 
+pub use command_step::CommandStep;
 pub use process::ProcessShell;
 
 use crate::policy::{Action, Decision, Policy};

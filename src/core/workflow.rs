@@ -9,6 +9,7 @@ pub enum OnFailure {
 pub struct Step {
     pub name: String,
     pub on_failure: OnFailure,
+    pub command: Option<String>,
 }
 
 impl Step {
@@ -16,6 +17,7 @@ impl Step {
         Step {
             name: name.to_string(),
             on_failure: OnFailure::Abort,
+            command: None,
         }
     }
 
@@ -23,7 +25,13 @@ impl Step {
         Step {
             name: name.to_string(),
             on_failure: OnFailure::RetryFrom(step),
+            command: None,
         }
+    }
+
+    pub fn with_command(mut self, command: &str) -> Self {
+        self.command = Some(command.to_string());
+        self
     }
 }
 

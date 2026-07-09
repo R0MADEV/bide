@@ -19,6 +19,8 @@ struct WorkflowConfig {
 struct StepConfig {
     name: String,
     on_failure: OnFailureConfig,
+    #[serde(default)]
+    command: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -50,6 +52,7 @@ pub(super) fn to_workflow(root: Root) -> Result<Workflow, ConfigError> {
         .map(|(s, on_failure)| Step {
             name: s.name,
             on_failure,
+            command: s.command,
         })
         .collect();
 

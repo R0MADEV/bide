@@ -25,6 +25,23 @@ fn parses_a_valid_recipe_and_resolves_retry_targets_by_name() {
 }
 
 #[test]
+fn parses_an_optional_command_on_a_step() {
+    let input = r#"
+        [workflow]
+        max_retries = 0
+
+        [[workflow.step]]
+        name = "verify"
+        on_failure = "abort"
+        command = "cargo test"
+    "#;
+
+    let workflow = parse(input).expect("valid recipe");
+
+    assert_eq!(workflow.steps[0].command.as_deref(), Some("cargo test"));
+}
+
+#[test]
 fn rejects_retry_from_an_unknown_step() {
     let input = r#"
         [workflow]

@@ -19,6 +19,8 @@ on_failure = "abort"
 
 [[workflow.step]]
 name = "verify"
+# Steps with a command run it behind the policy gate.
+command = "cargo test"
 # On failure, jump back to "implement" and try again (bounded by max_retries).
 on_failure = { retry_from = "implement" }
 
