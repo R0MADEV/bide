@@ -1,8 +1,14 @@
 mod agent_step;
+mod anthropic;
 mod claude_code;
+mod openai;
+mod protocol;
 
 pub use agent_step::AgentStep;
-pub use claude_code::{build_prompt, AgentProcess, AgentProcessResult, ClaudeCodeAgent};
+pub use anthropic::AnthropicAgent;
+pub use claude_code::{AgentProcess, AgentProcessResult, ClaudeCodeAgent};
+pub use openai::OpenAiAgent;
+pub use protocol::build_prompt;
 
 /// A request for an agent to reason about something. Agents analyse, plan or
 /// review; they never act on the system.

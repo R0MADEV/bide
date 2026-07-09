@@ -1,6 +1,15 @@
 # bide configuration. Copy to bide.toml and adjust.
 # The workflow is a composable list of steps the engine walks in order.
 
+# Optional. The agent backend that reasons for steps without a command.
+# The API key is NEVER stored here: api_key_env names the environment
+# variable that holds it. Omit this section to use the stub agent.
+# provider: openai | anthropic
+# [agent]
+# provider = "openai"
+# model = "gpt-4o"
+# api_key_env = "OPENAI_API_KEY"
+
 [workflow]
 # Retries allowed for a retry_from step before the run is marked Failed.
 max_retries = 2

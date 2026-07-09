@@ -1,5 +1,51 @@
-use bide::config::parse;
+use bide::config::{parse, parse_agent, Provider};
 use bide::OnFailure;
+
+#[test]
+fn parses_an_openai_agent_section() {
+    let input = r#"
+        [agent]
+        provider = "openai"
+        model = "gpt-4o"
+        api_key_env = "OPENAI_API_KEY"
+    "#;
+
+    let settings = parse_agent(input).expect("valid").expect("agent present");
+
+    assert_eq!(settings.provider, Provider::OpenAi);
+    assert_eq!(settings.model, "gpt-4o");
+    assert_eq!(settings.api_key_env, "OPENAI_API_KEY");
+}
+
+#[test]
+fn parses_an_anthropic_agent_section() {
+    let input = r#"
+        [agent]
+        provider = "anthropic"
+        model = "claude-sonnet-4-6"
+        api_key_env = "ANTHROPIC_API_KEY"
+    "#;
+
+    let settings = parse_agent(input).expect("valid").expect("agent present");
+    assert_eq!(settings.provider, Provider::Anthropic);
+}
+
+#[test]
+fn no_agent_section_yields_none() {
+    let input = "[workflow]\nmax_retries = 0\n";
+    assert!(parse_agent(input).expect("valid").is_none());
+}
+
+#[test]
+fn an_unknown_provider_is_rejected() {
+    let input = r#"
+        [agent]
+        provider = "gemini"
+        model = "x"
+        api_key_env = "Y"
+    "#;
+    assert!(parse_agent(input).is_err());
+}
 
 #[test]
 fn parses_a_valid_recipe_and_resolves_retry_targets_by_name() {
