@@ -1,7 +1,8 @@
+use bide::agents::{AgentRequest, AgentResponse, AgentRunner, AgentStep, Verdict};
 use bide::cli::{parse, Command};
 use bide::dispatch::{Dispatcher, StepHandler};
 use bide::tools::{Approver, CommandStep, ProcessShell};
-use bide::{run, Status, Step, StepOutcome, Workflow};
+use bide::{run, Status, Step, Workflow};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
@@ -35,7 +36,7 @@ fn run_task(task: &str) -> ExitCode {
     println!("bide run: {task}\n");
     print_plan(&workflow);
 
-    let mut dispatcher = build_dispatcher(&workflow);
+    let mut dispatcher = build_dispatcher(&workflow, task);
     let status = run(&workflow, &mut dispatcher);
 
     println!("\nfinished: {status:?}");
@@ -66,17 +67,17 @@ fn print_plan(workflow: &Workflow) {
     println!();
 }
 
-fn build_dispatcher(workflow: &Workflow) -> Dispatcher {
+fn build_dispatcher(workflow: &Workflow, task: &str) -> Dispatcher {
     let mut dispatcher = Dispatcher::new();
     for step in &workflow.steps {
-        dispatcher.register(&step.name, handler_for(step));
+        dispatcher.register(&step.name, handler_for(step, task));
     }
     dispatcher
 }
 
-fn handler_for(step: &Step) -> Box<dyn StepHandler> {
+fn handler_for(step: &Step, task: &str) -> Box<dyn StepHandler> {
     let Some(command) = &step.command else {
-        return Box::new(Placeholder);
+        return Box::new(AgentStep::new(&step.name, task, Box::new(StubAgent)));
     };
     Box::new(CommandStep::new(
         command,
@@ -85,13 +86,16 @@ fn handler_for(step: &Step) -> Box<dyn StepHandler> {
     ))
 }
 
-/// Stand-in for steps without a command (agent/context steps). Succeeds so the
-/// walking skeleton runs end to end until real handlers exist.
-struct Placeholder;
+/// Stand-in agent until the Claude Code driver exists: it proceeds without doing
+/// real reasoning so the workflow runs end to end.
+struct StubAgent;
 
-impl StepHandler for Placeholder {
-    fn handle(&mut self, _step: &Step) -> StepOutcome {
-        StepOutcome::Success
+impl AgentRunner for StubAgent {
+    fn run(&mut self, request: &AgentRequest) -> AgentResponse {
+        AgentResponse {
+            output: format!("(stub {} for: {})", request.role, request.input),
+            verdict: Verdict::Proceed,
+        }
     }
 }
 
