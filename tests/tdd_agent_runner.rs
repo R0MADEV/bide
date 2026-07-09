@@ -29,21 +29,21 @@ impl AgentRunner for FakeAgent {
 #[test]
 fn a_proceeding_agent_makes_the_step_succeed() {
     let mut handler = AgentStep::new("plan", "add jwt", Box::new(FakeAgent::new(Verdict::Proceed)));
-    assert_eq!(handler.handle(&Step::abort("plan")), StepOutcome::Success);
+    assert_eq!(handler.handle(&Step::abort("plan")).outcome, StepOutcome::Success);
 }
 
 #[test]
 fn a_rejecting_agent_makes_the_step_fail() {
     let verdict = Verdict::Reject("plan is over-engineered".to_string());
     let mut handler = AgentStep::new("critic", "add jwt", Box::new(FakeAgent::new(verdict)));
-    assert_eq!(handler.handle(&Step::abort("critic")), StepOutcome::Failure);
+    assert_eq!(handler.handle(&Step::abort("critic")).outcome, StepOutcome::Failure);
 }
 
 #[test]
 fn a_failing_agent_makes_the_step_fail() {
     let verdict = Verdict::Failed("model unavailable".to_string());
     let mut handler = AgentStep::new("plan", "add jwt", Box::new(FakeAgent::new(verdict)));
-    assert_eq!(handler.handle(&Step::abort("plan")), StepOutcome::Failure);
+    assert_eq!(handler.handle(&Step::abort("plan")).outcome, StepOutcome::Failure);
 }
 
 #[test]
