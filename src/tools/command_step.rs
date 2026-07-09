@@ -33,11 +33,13 @@ impl StepHandler for CommandStep {
             &self.command,
         );
         match outcome {
-            CommandOutcome::Ran { success: true } => {
-                StepReport::new(StepOutcome::Success, format!("$ {}\ncommand succeeded", self.command))
-            }
-            CommandOutcome::Ran { success: false } => {
-                StepReport::new(StepOutcome::Failure, format!("$ {}\ncommand failed", self.command))
+            CommandOutcome::Ran { success, output } => {
+                let step_outcome = if success {
+                    StepOutcome::Success
+                } else {
+                    StepOutcome::Failure
+                };
+                StepReport::new(step_outcome, format!("$ {}\n{}", self.command, output))
             }
             CommandOutcome::Denied(reason) => {
                 StepReport::new(StepOutcome::Failure, format!("denied by policy: {reason}"))

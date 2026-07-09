@@ -20,6 +20,7 @@ impl Shell for FakeShell {
         self.calls.push(command.to_string());
         CommandResult {
             success: self.succeed,
+            output: String::new(),
         }
     }
 }
@@ -78,7 +79,7 @@ fn an_approved_command_runs() {
 
     let outcome = run_guarded(&policy, &mut approver, &mut shell, "rm notes.txt");
 
-    assert_eq!(outcome, CommandOutcome::Ran { success: true });
+    assert!(matches!(outcome, CommandOutcome::Ran { success: true, .. }));
     assert_eq!(shell.calls, vec!["rm notes.txt"]);
 }
 
@@ -93,6 +94,6 @@ fn an_allowed_command_runs_and_reports_the_exit_result() {
 
     let outcome = run_guarded(&policy, &mut approver, &mut shell, "cargo test");
 
-    assert_eq!(outcome, CommandOutcome::Ran { success: false });
+    assert!(matches!(outcome, CommandOutcome::Ran { success: false, .. }));
     assert!(!approver.asked);
 }

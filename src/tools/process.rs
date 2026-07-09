@@ -8,9 +8,21 @@ pub struct ProcessShell;
 
 impl Shell for ProcessShell {
     fn run(&mut self, command: &str) -> CommandResult {
-        let status = shell_command(command).status();
+        let Ok(output) = shell_command(command).output() else {
+            return CommandResult {
+                success: false,
+                output: "failed to spawn command".to_string(),
+            };
+        };
+
+        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.trim().is_empty() {
+            text.push_str(&stderr);
+        }
         CommandResult {
-            success: matches!(status, Ok(status) if status.success()),
+            success: output.status.success(),
+            output: text,
         }
     }
 }

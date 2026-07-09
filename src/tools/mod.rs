@@ -19,13 +19,14 @@ pub trait Approver {
 
 pub struct CommandResult {
     pub success: bool,
+    pub output: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CommandOutcome {
     Denied(String),
     Rejected(String),
-    Ran { success: bool },
+    Ran { success: bool, output: String },
 }
 
 /// Runs a command only after the Policy Engine allows it. Denied commands never
@@ -51,5 +52,6 @@ pub fn run_guarded(
     let result = shell.run(command);
     CommandOutcome::Ran {
         success: result.success,
+        output: result.output,
     }
 }
