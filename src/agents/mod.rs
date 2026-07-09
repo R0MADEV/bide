@@ -1,6 +1,8 @@
 mod agent_step;
+mod claude_code;
 
 pub use agent_step::AgentStep;
+pub use claude_code::{build_prompt, AgentProcess, AgentProcessResult, ClaudeCodeAgent};
 
 /// A request for an agent to reason about something. Agents analyse, plan or
 /// review; they never act on the system.

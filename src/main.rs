@@ -1,4 +1,6 @@
-use bide::agents::{AgentRequest, AgentResponse, AgentRunner, AgentStep, Verdict};
+use bide::agents::{
+    AgentRequest, AgentResponse, AgentRunner, AgentStep, ClaudeCodeAgent, Verdict,
+};
 use bide::cli::{parse, Command};
 use bide::dispatch::{Dispatcher, StepHandler};
 use bide::tools::{Approver, CommandStep, ProcessShell};
@@ -77,13 +79,23 @@ fn build_dispatcher(workflow: &Workflow, task: &str) -> Dispatcher {
 
 fn handler_for(step: &Step, task: &str) -> Box<dyn StepHandler> {
     let Some(command) = &step.command else {
-        return Box::new(AgentStep::new(&step.name, task, Box::new(StubAgent)));
+        return Box::new(AgentStep::new(&step.name, task, make_agent()));
     };
     Box::new(CommandStep::new(
         command,
         Box::new(ProcessShell),
         Box::new(PromptApprover),
     ))
+}
+
+/// Use the real Claude Code driver when opted in, otherwise the stub. The
+/// default keeps `bide run` working without `claude` installed.
+fn make_agent() -> Box<dyn AgentRunner> {
+    let use_claude = matches!(std::env::var("BIDE_AGENT").as_deref(), Ok("claude"));
+    if use_claude {
+        return Box::new(ClaudeCodeAgent::with_cli());
+    }
+    Box::new(StubAgent)
 }
 
 /// Stand-in agent until the Claude Code driver exists: it proceeds without doing
