@@ -49,9 +49,16 @@ impl AgentProcess for ClaudeCli {
         let mut command = Command::new("claude");
         command.arg("--print").arg(prompt);
         let captured = exec::run(command, TIMEOUT);
+        // On success the response is on stdout; on failure surface stderr/timeout
+        // so the report shows why the agent call failed.
+        let stdout = if captured.success {
+            captured.stdout
+        } else {
+            captured.merged()
+        };
         AgentProcessResult {
             success: captured.success,
-            stdout: captured.stdout,
+            stdout,
         }
     }
 }

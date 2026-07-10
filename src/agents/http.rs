@@ -6,17 +6,18 @@ pub(super) fn send_and_extract(
     request: RequestBuilder,
     extract: fn(&str) -> Option<String>,
 ) -> (bool, String) {
-    let Ok(response) = request.send() else {
-        return (false, String::new());
+    let response = match request.send() {
+        Ok(response) => response,
+        Err(error) => return (false, format!("request failed: {error}")),
     };
-    if !response.status().is_success() {
-        return (false, String::new());
+
+    let status = response.status();
+    let body = response.text().unwrap_or_default();
+    if !status.is_success() {
+        return (false, format!("HTTP {status}: {}", body.trim()));
     }
-    let Ok(text) = response.text() else {
-        return (false, String::new());
-    };
-    match extract(&text) {
+    match extract(&body) {
         Some(content) => (true, content),
-        None => (false, String::new()),
+        None => (false, format!("unexpected response: {}", body.trim())),
     }
 }

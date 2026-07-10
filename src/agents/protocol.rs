@@ -72,3 +72,21 @@ fn reject_reason(body: &str) -> Option<String> {
     let rest = body.strip_prefix("REJECT")?;
     Some(rest.trim_start_matches(':').trim().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_call_keeps_the_diagnostic_as_output() {
+        let response = response_from(false, "HTTP 401: invalid api key".to_string());
+        assert!(matches!(response.verdict, Verdict::Failed(_)));
+        assert_eq!(response.output, "HTTP 401: invalid api key");
+    }
+
+    #[test]
+    fn a_successful_call_parses_the_verdict() {
+        let response = response_from(true, "looks good\nVERDICT: PROCEED".to_string());
+        assert_eq!(response.verdict, Verdict::Proceed);
+    }
+}
