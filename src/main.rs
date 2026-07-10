@@ -7,6 +7,13 @@ use bide::config::{AgentSettings, Provider, ToolSettings};
 use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, Observer, StepHandler, StepReport};
+use bide::tui::{App, ChannelGate, ChannelObserver, Key as TuiKey, StepStatus, UiEvent};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::layout::{Constraint, Layout};
+use ratatui::widgets::{Block, List, ListItem, Paragraph, Wrap};
+use ratatui::Frame;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
 use bide::git::{branch_name, commit_message, pr_title, Git, GitCli};
 use bide::policy::Policy;
 use bide::report::{save, RunRecord};
@@ -15,7 +22,7 @@ use bide::{run_from, Status, Step, StepOutcome, Task, Workflow};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CONFIG_PATH: &str = "bide.toml";
 const RUNS_DIR: &str = ".bide/runs";
@@ -33,16 +40,145 @@ fn main() -> ExitCode {
 
     match command {
         Command::Run(options) => run_task(&options),
+        Command::Tui(options) => tui_command(&options),
         Command::Doctor => doctor(),
         Command::Help => help(),
     }
+}
+
+/// Runs the workflow in a worker thread and drives a terminal UI: the steps with
+/// live status, and a checkpoint panel where you continue, re-plan with feedback
+/// or abort. The engine talks to the UI only through the Observer/Gate ports.
+fn tui_command(options: &RunOptions) -> ExitCode {
+    let workflow = match resolve_workflow() {
+        Ok(workflow) => workflow,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let tools = tools_from_config();
+    let agent = match resolve_agent(options.agent.as_deref(), &tools.claude) {
+        Ok(agent) => agent,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let policy = policy_from_config();
+    let context = context_pack(&options.task, use_lexis(options), &tools.lexis);
+    let step_names: Vec<String> = workflow.steps.iter().map(|s| s.name.clone()).collect();
+
+    let (events_tx, events_rx) = mpsc::channel::<UiEvent>();
+    let (decisions_tx, decisions_rx) = mpsc::channel::<Control>();
+
+    let task = options.task.clone();
+    let claude = tools.claude.clone();
+    let context_text = context.text;
+    let worker = thread::spawn(move || {
+        let mut dispatcher =
+            build_dispatcher(&workflow, &task, &context_text, &agent, &policy, &claude);
+        dispatcher.set_observer(Box::new(ChannelObserver::new(events_tx.clone())));
+        dispatcher.set_gate(Box::new(ChannelGate::new(events_tx.clone(), decisions_rx)));
+        let mut state = Task::new();
+        let status = run_from(&workflow, &mut dispatcher, &mut state);
+        let _ = events_tx.send(UiEvent::Finished(status));
+    });
+
+    let exit = run_ui(step_names, &events_rx, &decisions_tx);
+    let _ = worker.join();
+    exit
+}
+
+fn run_ui(step_names: Vec<String>, events: &Receiver<UiEvent>, decisions: &Sender<Control>) -> ExitCode {
+    let mut terminal = ratatui::init();
+    let mut app = App::new(step_names);
+
+    let final_status = loop {
+        while let Ok(event) = events.try_recv() {
+            app.apply(event);
+        }
+        let _ = terminal.draw(|frame| render(frame, &app));
+
+        if !event::poll(Duration::from_millis(100)).unwrap_or(false) {
+            continue;
+        }
+        let Ok(Event::Key(key)) = event::read() else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        if let Some(mapped) = map_key(key.code) {
+            if let Some(control) = app.on_key(mapped) {
+                let _ = decisions.send(control);
+            }
+        }
+        let quit = matches!(key.code, KeyCode::Char('q') | KeyCode::Enter | KeyCode::Esc);
+        if app.done.is_some() && quit {
+            break app.done;
+        }
+    };
+
+    ratatui::restore();
+    match final_status {
+        Some(Status::Accepted) => ExitCode::SUCCESS,
+        _ => ExitCode::FAILURE,
+    }
+}
+
+fn map_key(code: KeyCode) -> Option<TuiKey> {
+    match code {
+        KeyCode::Enter => Some(TuiKey::Enter),
+        KeyCode::Esc => Some(TuiKey::Esc),
+        KeyCode::Backspace => Some(TuiKey::Backspace),
+        KeyCode::Char(c) => Some(TuiKey::Char(c)),
+        _ => None,
+    }
+}
+
+fn render(frame: &mut Frame, app: &App) {
+    let areas =
+        Layout::vertical([Constraint::Percentage(45), Constraint::Min(0)]).split(frame.area());
+
+    let items: Vec<ListItem> = app
+        .steps
+        .iter()
+        .map(|step| {
+            let mark = match &step.status {
+                StepStatus::Pending => "·",
+                StepStatus::Running => "▶",
+                StepStatus::Done(StepOutcome::Success) => "✓",
+                StepStatus::Done(_) => "✗",
+            };
+            ListItem::new(format!(" {mark} {}", step.name))
+        })
+        .collect();
+    frame.render_widget(List::new(items).block(Block::bordered().title(" bide ")), areas[0]);
+
+    let panel = match (&app.checkpoint, app.done) {
+        (Some(checkpoint), _) => Paragraph::new(format!(
+            "{}\n\n> feedback: {}\n\n[Enter] continue (or re-plan with feedback)   [Esc] abort",
+            checkpoint.output.trim(),
+            app.feedback
+        ))
+        .block(Block::bordered().title(format!(" checkpoint: {} ", checkpoint.step)))
+        .wrap(Wrap { trim: false }),
+        (None, Some(status)) => Paragraph::new(format!("finished: {status:?}\n\n[q] quit"))
+            .block(Block::bordered().title(" done ")),
+        (None, None) => {
+            Paragraph::new("running…").block(Block::bordered().title(" status "))
+        }
+    };
+    frame.render_widget(panel, areas[1]);
 }
 
 fn help() -> ExitCode {
     println!(
         "bide — a deterministic workflow engine.\n\n\
          Usage:\n  \
-           bide run \"<task>\" [flags]\n  \
+           bide run \"<task>\" [flags]   run in the terminal (line-based)\n  \
+           bide tui \"<task>\" [flags]   run in an interactive terminal UI\n  \
            bide doctor\n  \
            bide help\n\n\
          Run flags (each also has a BIDE_* env var):\n  \

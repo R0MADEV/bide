@@ -12,6 +12,7 @@ pub struct RunOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Run(RunOptions),
+    Tui(RunOptions),
     Doctor,
     Help,
 }
@@ -24,19 +25,19 @@ pub fn parse(args: impl Iterator<Item = String>) -> Result<Command, String> {
     match command.as_str() {
         "help" | "--help" | "-h" => Ok(Command::Help),
         "doctor" => Ok(Command::Doctor),
-        "run" => parse_run(&args[1..]),
+        "run" => parse_run(&args[1..]).map(Command::Run),
+        "tui" => parse_run(&args[1..]).map(Command::Tui),
         other => Err(format!("unknown command: {other}")),
     }
 }
 
-fn parse_run(args: &[String]) -> Result<Command, String> {
+fn parse_run(args: &[String]) -> Result<RunOptions, String> {
     let mut options = RunOptions::default();
     let mut task: Option<String> = None;
     let mut index = 0;
 
     while index < args.len() {
         match args[index].as_str() {
-            "--help" | "-h" => return Ok(Command::Help),
             "--yes" | "-y" => options.yes = true,
             "--branch" => options.branch = true,
             "--pr" => options.pr = true,
@@ -63,7 +64,7 @@ fn parse_run(args: &[String]) -> Result<Command, String> {
         return Err("run requires a task description".to_string());
     }
     options.task = task.unwrap_or_default();
-    Ok(Command::Run(options))
+    Ok(options)
 }
 
 fn value(args: &[String], index: usize, flag: &str) -> Result<String, String> {

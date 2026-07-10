@@ -55,6 +55,14 @@ fn parses_the_resume_flag_without_a_task() {
 }
 
 #[test]
+fn parses_the_tui_command() {
+    assert!(matches!(
+        parse(args(&["tui", "add jwt"])).unwrap(),
+        Command::Tui(_)
+    ));
+}
+
+#[test]
 fn parses_the_doctor_command() {
     assert_eq!(parse(args(&["doctor"])).unwrap(), Command::Doctor);
 }
