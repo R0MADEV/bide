@@ -68,6 +68,11 @@ fn parses_the_doctor_command() {
 }
 
 #[test]
+fn parses_the_clean_command() {
+    assert_eq!(parse(args(&["clean"])).unwrap(), Command::Clean);
+}
+
+#[test]
 fn parses_the_help_command() {
     assert_eq!(parse(args(&["help"])).unwrap(), Command::Help);
     assert_eq!(parse(args(&["--help"])).unwrap(), Command::Help);

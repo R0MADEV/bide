@@ -1,4 +1,4 @@
-use bide::report::{prune, render, save, worth_saving, RunRecord, StepRecord};
+use bide::report::{clean, prune, render, save, worth_saving, RunRecord, StepRecord};
 use bide::{Status, StepOutcome};
 
 #[test]
@@ -23,6 +23,31 @@ fn prune_keeps_only_the_newest_runs() {
     assert!(runs.join("run-3").exists());
     assert!(runs.join("run-4").exists());
     let _ = std::fs::remove_dir_all(&runs);
+}
+
+#[test]
+fn clean_removes_every_run_and_reports_the_count() {
+    let runs = std::env::temp_dir().join("bide-test-clean");
+    let _ = std::fs::remove_dir_all(&runs);
+    for id in ["run-1", "run-2", "run-3"] {
+        std::fs::create_dir_all(runs.join(id)).unwrap();
+    }
+
+    let removed = clean(&runs).expect("clean");
+
+    assert_eq!(removed, 3);
+    assert!(!runs.join("run-1").exists());
+    assert!(!runs.join("run-2").exists());
+    assert!(!runs.join("run-3").exists());
+    let _ = std::fs::remove_dir_all(&runs);
+}
+
+#[test]
+fn clean_on_a_missing_directory_removes_nothing() {
+    let runs = std::env::temp_dir().join("bide-test-clean-missing");
+    let _ = std::fs::remove_dir_all(&runs);
+
+    assert_eq!(clean(&runs).expect("clean"), 0);
 }
 
 fn sample() -> RunRecord {

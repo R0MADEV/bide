@@ -18,7 +18,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use bide::git::{branch_name, commit_message, pr_title, Git, GitCli};
 use bide::policy::Policy;
-use bide::report::{save, worth_saving, RunRecord};
+use bide::report::{clean as clean_runs, save, worth_saving, RunRecord};
 use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, ProcessShell};
 use bide::{run_from, Status, Step, StepOutcome, Task, Workflow};
 use std::io::{self, Write};
@@ -52,6 +52,7 @@ fn main() -> ExitCode {
         }
         Command::Repl => repl(&RunOptions::default(), None),
         Command::Doctor => doctor(),
+        Command::Clean => clean(),
         Command::Help => help(),
     }
 }
@@ -330,6 +331,7 @@ fn help() -> ExitCode {
            bide run \"<task>\" [flags]   run once in the terminal (line-based)\n  \
            bide tui \"<task>\" [flags]   run a task in the interactive UI\n  \
            bide doctor\n  \
+           bide clean                  empty .bide/runs (delete all saved runs)\n  \
            bide help\n\n\
          Run flags (each also has a BIDE_* env var):\n  \
            --yes, -y           run straight through, no interactive checkpoints\n  \
@@ -340,6 +342,20 @@ fn help() -> ExitCode {
            --resume <id>       continue a previous run from where it stopped"
     );
     ExitCode::SUCCESS
+}
+
+/// Empty `.bide/runs`, deleting every saved run folder, and report the count.
+fn clean() -> ExitCode {
+    match clean_runs(Path::new(RUNS_DIR)) {
+        Ok(removed) => {
+            println!("removed {removed} run{}", if removed == 1 { "" } else { "s" });
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("error: could not clean {RUNS_DIR}: {error}");
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn opt_in(flag: bool, env: &str) -> bool {

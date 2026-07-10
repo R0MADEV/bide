@@ -98,6 +98,23 @@ pub fn prune(runs_dir: &Path, keep: usize) -> io::Result<()> {
     Ok(())
 }
 
+/// Remove every saved run directory in `runs_dir` and return how many were
+/// removed. A missing directory is not an error: nothing to clean means zero.
+pub fn clean(runs_dir: &Path) -> io::Result<usize> {
+    let Ok(entries) = fs::read_dir(runs_dir) else {
+        return Ok(0);
+    };
+    let dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    for dir in &dirs {
+        fs::remove_dir_all(dir)?;
+    }
+    Ok(dirs.len())
+}
+
 fn file_slug(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
