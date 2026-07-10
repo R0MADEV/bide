@@ -24,6 +24,29 @@ impl Task {
         self.cursor
     }
 
+    /// True when the just-failed step is a retry_from loop that has spent its
+    /// budget. This is the moment an interactive run offers the human a choice
+    /// (keep retrying or abort) instead of failing outright.
+    pub fn hit_retry_limit(&self, workflow: &Workflow, outcome: StepOutcome) -> bool {
+        if outcome != StepOutcome::Failure {
+            return false;
+        }
+        let OnFailure::RetryFrom(_) = workflow.steps[self.cursor].on_failure else {
+            return false;
+        };
+        self.retries == workflow.max_retries
+    }
+
+    /// Grant a fresh budget and jump back to the retry_from target, used when a
+    /// human chooses to keep going at the limit. No-op on a non-retry step.
+    pub fn force_retry(&mut self, workflow: &Workflow) {
+        let OnFailure::RetryFrom(step) = workflow.steps[self.cursor].on_failure else {
+            return;
+        };
+        self.retries = 0;
+        self.cursor = step;
+    }
+
     pub fn advance(&mut self, workflow: &Workflow, outcome: StepOutcome) -> Status {
         if outcome == StepOutcome::Aborted {
             return Status::Aborted;
