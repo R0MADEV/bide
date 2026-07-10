@@ -51,6 +51,7 @@ fn main() -> ExitCode {
             repl(&options, Some(start))
         }
         Command::Repl => repl(&RunOptions::default(), None),
+        Command::Init => init(),
         Command::Doctor => doctor(),
         Command::Clean => clean(),
         Command::Help => help(),
@@ -330,6 +331,7 @@ fn help() -> ExitCode {
            bide                        interactive workspace (type tasks or ?questions)\n  \
            bide run \"<task>\" [flags]   run once in the terminal (line-based)\n  \
            bide tui \"<task>\" [flags]   run a task in the interactive UI\n  \
+           bide init                   scaffold a starter bide.toml here\n  \
            bide doctor\n  \
            bide clean                  empty .bide/runs (delete all saved runs)\n  \
            bide help\n\n\
@@ -360,6 +362,26 @@ fn clean() -> ExitCode {
 
 fn opt_in(flag: bool, env: &str) -> bool {
     flag || matches!(std::env::var(env).as_deref(), Ok("1"))
+}
+
+/// Scaffold a starter bide.toml in the current directory, refusing to overwrite
+/// an existing one.
+fn init() -> ExitCode {
+    let path = Path::new(CONFIG_PATH);
+    match bide::config::scaffold(path) {
+        Ok(true) => {
+            println!("created {CONFIG_PATH} — edit it, then run `bide run \"<task>\"`");
+            ExitCode::SUCCESS
+        }
+        Ok(false) => {
+            eprintln!("{CONFIG_PATH} already exists — not overwriting");
+            ExitCode::from(1)
+        }
+        Err(error) => {
+            eprintln!("error: could not write {CONFIG_PATH}: {error}");
+            ExitCode::from(2)
+        }
+    }
 }
 
 fn doctor() -> ExitCode {

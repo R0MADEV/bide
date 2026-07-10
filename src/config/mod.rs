@@ -1,11 +1,13 @@
 mod agent;
 mod error;
+mod init;
 mod policy;
 mod schema;
 mod tools;
 
 pub use agent::{AgentSettings, Provider};
 pub use error::ConfigError;
+pub use init::{scaffold, STARTER_CONFIG};
 pub use policy::PolicySettings;
 pub use tools::ToolSettings;
 
