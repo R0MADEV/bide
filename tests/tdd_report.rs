@@ -1,5 +1,29 @@
-use bide::report::{render, save, RunRecord, StepRecord};
+use bide::report::{prune, render, save, worth_saving, RunRecord, StepRecord};
 use bide::{Status, StepOutcome};
+
+#[test]
+fn a_successful_no_change_run_is_not_worth_saving() {
+    assert!(!worth_saving(Status::Accepted, false)); // succeeded, changed nothing
+    assert!(worth_saving(Status::Accepted, true)); // succeeded and changed the tree
+    assert!(worth_saving(Status::Failed, false)); // a failure is worth inspecting
+}
+
+#[test]
+fn prune_keeps_only_the_newest_runs() {
+    let runs = std::env::temp_dir().join("bide-test-prune");
+    let _ = std::fs::remove_dir_all(&runs);
+    for id in ["run-1", "run-2", "run-3", "run-4"] {
+        std::fs::create_dir_all(runs.join(id)).unwrap();
+    }
+
+    prune(&runs, 2).expect("prune");
+
+    assert!(!runs.join("run-1").exists());
+    assert!(!runs.join("run-2").exists());
+    assert!(runs.join("run-3").exists());
+    assert!(runs.join("run-4").exists());
+    let _ = std::fs::remove_dir_all(&runs);
+}
 
 fn sample() -> RunRecord {
     RunRecord {

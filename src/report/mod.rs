@@ -70,6 +70,34 @@ fn save_step_artifacts(dir: &Path, steps: &[StepRecord]) -> io::Result<()> {
     Ok(())
 }
 
+/// A run is worth keeping if it changed the working tree during the run, or if
+/// it did not simply succeed (a failure/abort is worth inspecting). A successful
+/// no-op (stub or nothing-to-do) is just noise on disk.
+pub fn worth_saving(status: Status, changed: bool) -> bool {
+    changed || status != Status::Accepted
+}
+
+/// Keep only the newest `keep` run directories; delete the rest.
+pub fn prune(runs_dir: &Path, keep: usize) -> io::Result<()> {
+    let Ok(entries) = fs::read_dir(runs_dir) else {
+        return Ok(());
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    // Run ids are run-<epoch-seconds>, so name order is chronological.
+    dirs.sort();
+    if dirs.len() <= keep {
+        return Ok(());
+    }
+    for old in &dirs[..dirs.len() - keep] {
+        let _ = fs::remove_dir_all(old);
+    }
+    Ok(())
+}
+
 fn file_slug(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })

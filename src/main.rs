@@ -18,7 +18,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use bide::git::{branch_name, commit_message, pr_title, Git, GitCli};
 use bide::policy::Policy;
-use bide::report::{save, RunRecord};
+use bide::report::{save, worth_saving, RunRecord};
 use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, ProcessShell};
 use bide::{run_from, Status, Step, StepOutcome, Task, Workflow};
 use std::io::{self, Write};
@@ -29,6 +29,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const CONFIG_PATH: &str = "bide.toml";
 const RUNS_DIR: &str = ".bide/runs";
 const IMPLEMENT_STEP: &str = "implement";
+const KEEP_RUNS: usize = 20;
 
 fn main() -> ExitCode {
     let command = match parse(std::env::args().skip(1)) {
@@ -126,26 +127,39 @@ fn spawn_route(input: &str, options: &RunOptions, app: &mut App) -> ActiveRun {
     let context_flag = context_choice(options);
     let handle = thread::spawn(move || {
         let tools = tools_from_config();
-        let reply = bide::context::ask_claude(&tools.claude, &route_prompt(&input));
-        let is_task = reply.trim().eq_ignore_ascii_case("TASK") || reply.trim().starts_with("TASK");
-        if !is_task {
-            let answer = if reply.trim().is_empty() {
-                "(no answer — is claude available?)".to_string()
-            } else {
-                reply
-            };
-            let _ = events_tx.send(UiEvent::Answer(answer));
-            let _ = events_tx.send(UiEvent::Finished(Status::Accepted));
+        // An obvious task skips the AI classifier and runs straight away.
+        if matches!(bide::route::guess(&input), Some(bide::route::Guess::Task)) {
+            run_workflow_worker(
+                &input,
+                agent_flag.as_deref(),
+                context_flag.as_deref(),
+                &tools,
+                &events_tx,
+                decisions_rx,
+            );
             return;
         }
-        run_workflow_worker(
-            &input,
-            agent_flag.as_deref(),
-            context_flag.as_deref(),
-            &tools,
-            &events_tx,
-            decisions_rx,
-        );
+        // Otherwise ask Claude+lexis: it answers a question, or replies TASK.
+        let reply = bide::context::ask_claude(&tools.claude, &route_prompt(&input));
+        let is_task = reply.trim().eq_ignore_ascii_case("TASK") || reply.trim().starts_with("TASK");
+        if is_task {
+            run_workflow_worker(
+                &input,
+                agent_flag.as_deref(),
+                context_flag.as_deref(),
+                &tools,
+                &events_tx,
+                decisions_rx,
+            );
+            return;
+        }
+        let answer = if reply.trim().is_empty() {
+            "(no answer — is claude available?)".to_string()
+        } else {
+            reply
+        };
+        let _ = events_tx.send(UiEvent::Answer(answer));
+        let _ = events_tx.send(UiEvent::Finished(Status::Accepted));
     });
 
     ActiveRun {
@@ -184,6 +198,7 @@ fn run_workflow_worker(
     };
     let policy = policy_from_config();
     let context = context_pack(task, context_flag, tools);
+    let diff_before = GitCli.diff();
 
     let _ = events_tx.send(UiEvent::Steps(
         workflow.steps.iter().map(|s| s.name.clone()).collect(),
@@ -197,15 +212,9 @@ fn run_workflow_worker(
     let status = run_from(&workflow, &mut dispatcher, &mut state);
 
     let diff = GitCli.diff();
-    let id = run_id();
-    save_state(
-        &id,
-        &RunState {
-            task: task.to_string(),
-            cursor: state.cursor(),
-            board: dispatcher.board_entries().to_vec(),
-        },
-    );
+    let changed = diff != diff_before;
+    let board = dispatcher.board_entries().to_vec();
+    let cursor = state.cursor();
     let record = RunRecord {
         task: task.to_string(),
         steps: dispatcher.into_records(),
@@ -213,7 +222,7 @@ fn run_workflow_worker(
         diff,
         context: context.text,
     };
-    let _ = record_run(&record, &id);
+    persist_run(&run_id(), &record, cursor, board, changed);
     let _ = events_tx.send(UiEvent::Finished(status));
 }
 
@@ -393,6 +402,7 @@ fn run_task(options: &RunOptions) -> ExitCode {
     println!("agent: {}", agent.label());
     println!("git: {}\n", git_state());
     let clean_at_start = GitCli.status().clean;
+    let diff_before = GitCli.diff();
     let context = context_pack(task, context_choice(options).as_deref(), &tools);
     println!("context:\n{}\n", context.text);
     print_plan(&workflow);
@@ -410,16 +420,9 @@ fn run_task(options: &RunOptions) -> ExitCode {
     println!("\nfinished: {status:?}");
     let diff = GitCli.diff();
     let branch = finalize_branch(task, clean_at_start, &diff, opt_in(options.branch, "BIDE_BRANCH"));
-
-    save_state(
-        &id,
-        &RunState {
-            task: task.to_string(),
-            cursor: work.cursor(),
-            board: dispatcher.board_entries().to_vec(),
-        },
-    );
-
+    let changed = diff != diff_before;
+    let board = dispatcher.board_entries().to_vec();
+    let cursor = work.cursor();
     let record = RunRecord {
         task: task.to_string(),
         steps: dispatcher.into_records(),
@@ -427,7 +430,7 @@ fn run_task(options: &RunOptions) -> ExitCode {
         diff,
         context: context.text,
     };
-    let report_path = record_run(&record, &id);
+    let report_path = persist_run(&id, &record, cursor, board, changed);
     maybe_open_pr(
         branch.as_deref(),
         task,
@@ -475,6 +478,31 @@ fn context_choice(options: &RunOptions) -> Option<String> {
         .context
         .clone()
         .or_else(|| std::env::var("BIDE_CONTEXT").ok())
+}
+
+/// Persist a run only when it is worth keeping (it changed something, or failed),
+/// then prune old runs so `.bide/runs` does not fill up with noise.
+fn persist_run(
+    id: &str,
+    record: &RunRecord,
+    cursor: usize,
+    board: Vec<(String, String)>,
+    changed: bool,
+) -> Option<PathBuf> {
+    if !worth_saving(record.status, changed) {
+        return None;
+    }
+    save_state(
+        id,
+        &RunState {
+            task: record.task.clone(),
+            cursor,
+            board,
+        },
+    );
+    let path = record_run(record, id);
+    let _ = bide::report::prune(Path::new(RUNS_DIR), KEEP_RUNS);
+    path
 }
 
 fn record_run(record: &RunRecord, id: &str) -> Option<PathBuf> {

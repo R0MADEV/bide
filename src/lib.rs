@@ -11,6 +11,7 @@ pub mod git;
 pub mod dispatch;
 pub mod policy;
 pub mod report;
+pub mod route;
 pub mod tools;
 pub mod tui;
 
