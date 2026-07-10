@@ -18,19 +18,22 @@ const ALLOWED_TOOLS: &str = "mcp__lexis__search_code,mcp__lexis__get_symbol,\
 /// This is the retrieval agent: it reports real code, it does not edit.
 pub struct ClaudeContext {
     program: String,
+    progress: crate::tools::Progress,
 }
 
 impl ClaudeContext {
-    pub fn new(program: &str) -> Self {
+    pub fn new(program: &str, progress: crate::tools::Progress) -> Self {
         ClaudeContext {
             program: program.to_string(),
+            progress,
         }
     }
 }
 
 impl CodeContext for ClaudeContext {
     fn lookup(&mut self, task: &str) -> String {
-        ask_claude(&self.program, &retrieval_prompt(task))
+        let progress = &self.progress;
+        ask_claude_streaming(&self.program, &retrieval_prompt(task), |line| progress(line))
     }
 }
 

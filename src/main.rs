@@ -162,7 +162,9 @@ fn spawn_route(input: &str, options: &RunOptions, history: &[Turn], app: &mut Ap
     let input = input.to_string();
     let history = history.to_vec();
     let agent_flag = options.agent.clone();
-    let context_flag = context_choice(options);
+    // The interactive workspace reads real code by default (Claude Code + lexis
+    // tools), so plans are grounded in the repo instead of generic.
+    let context_flag = context_choice(options).or_else(|| Some("claude".to_string()));
     let handle = thread::spawn(move || {
         let tools = tools_from_config();
         // An obvious task skips the AI classifier and runs straight away.
@@ -231,18 +233,18 @@ fn run_workflow_worker(
         Err(message) => return finish_with_error(events_tx, &message),
     };
     let policy = policy_from_config();
-    let context = context_pack(task, context_flag, tools);
+    // Stream tool use (context reads, plan tokens, edits) to the UI as it happens.
+    let progress_tx = events_tx.clone();
+    let progress: Progress = std::rc::Rc::new(move |line: &str| {
+        let _ = progress_tx.send(UiEvent::Chunk(line.to_string()));
+    });
+    let context = context_pack(task, context_flag, tools, &progress);
     let diff_before = GitCli.diff();
 
     let _ = events_tx.send(UiEvent::Steps(
         workflow.steps.iter().map(|s| s.name.clone()).collect(),
     ));
 
-    // Stream each step's tool use to the UI as a live progress line.
-    let progress_tx = events_tx.clone();
-    let progress: Progress = std::rc::Rc::new(move |line: &str| {
-        let _ = progress_tx.send(UiEvent::Chunk(line.to_string()));
-    });
     let mut dispatcher = build_dispatcher(
         &workflow,
         task,
@@ -448,13 +450,13 @@ fn run_task(options: &RunOptions) -> ExitCode {
     println!("git: {}\n", git_state());
     let clean_at_start = GitCli.status().clean;
     let diff_before = GitCli.diff();
-    let context = context_pack(task, context_choice(options).as_deref(), &tools);
+    // On the terminal, print each step's tool use as a live progress line.
+    let progress: Progress = std::rc::Rc::new(|line: &str| println!("  {line}"));
+    let context = context_pack(task, context_choice(options).as_deref(), &tools, &progress);
     println!("context:\n{}\n", context.text);
     print_plan(&workflow);
 
     let policy = policy_from_config();
-    // On the terminal, print each step's tool use as a live progress line.
-    let progress: Progress = std::rc::Rc::new(|line: &str| println!("  {line}"));
     let mut dispatcher = build_dispatcher(
         &workflow,
         task,
@@ -765,16 +767,26 @@ fn policy_from_config() -> Policy {
     }
 }
 
-fn context_pack(task: &str, choice: Option<&str>, tools: &ToolSettings) -> ContextPack {
-    let mut provider = context_provider(choice, tools);
+fn context_pack(
+    task: &str,
+    choice: Option<&str>,
+    tools: &ToolSettings,
+    progress: &Progress,
+) -> ContextPack {
+    let mut provider = context_provider(choice, tools, progress);
     build_context(provider.as_mut(), task)
 }
 
 /// Pick the context source. `claude` runs Claude Code with the lexis tools to
-/// fetch real code; `lexis` runs `lexis ask`; anything else gives no context.
-fn context_provider(choice: Option<&str>, tools: &ToolSettings) -> Box<dyn CodeContext> {
+/// fetch real code (streaming what it reads); `lexis` runs `lexis ask`; anything
+/// else gives no context.
+fn context_provider(
+    choice: Option<&str>,
+    tools: &ToolSettings,
+    progress: &Progress,
+) -> Box<dyn CodeContext> {
     match choice {
-        Some("claude") => Box::new(ClaudeContext::new(&tools.claude)),
+        Some("claude") => Box::new(ClaudeContext::new(&tools.claude, progress.clone())),
         Some("lexis") => {
             let cwd = std::env::current_dir().unwrap_or_default();
             Box::new(LexisAsk::new(cwd, &tools.lexis))
