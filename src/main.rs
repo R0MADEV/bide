@@ -3,7 +3,7 @@ use bide::agents::{
     OpenAiAgent, Verdict,
 };
 use bide::cli::{parse, Command, RunOptions};
-use bide::config::{AgentSettings, Provider};
+use bide::config::{AgentSettings, Provider, ToolSettings};
 use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, StepHandler, StepReport};
@@ -60,11 +60,12 @@ fn opt_in(flag: bool, env: &str) -> bool {
 }
 
 fn doctor() -> ExitCode {
+    let tools = tools_from_config();
     let checks = vec![
         tool_check("git", tool_present("git"), true),
-        tool_check("claude", tool_present("claude"), false),
-        tool_check("lexis", tool_present("lexis"), false),
-        tool_check("gh", tool_present("gh"), false),
+        tool_check(&tools.claude, tool_present(&tools.claude), false),
+        tool_check(&tools.lexis, tool_present(&tools.lexis), false),
+        tool_check(&tools.gh, tool_present(&tools.gh), false),
         config_check(config_state()),
     ];
 
@@ -111,7 +112,8 @@ fn run_task(options: &RunOptions) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let agent = match resolve_agent(options.agent.as_deref()) {
+    let tools = tools_from_config();
+    let agent = match resolve_agent(options.agent.as_deref(), &tools.claude) {
         Ok(agent) => agent,
         Err(message) => {
             eprintln!("error: {message}");
@@ -123,12 +125,13 @@ fn run_task(options: &RunOptions) -> ExitCode {
     println!("agent: {}", agent.label());
     println!("git: {}\n", git_state());
     let clean_at_start = GitCli.status().clean;
-    let context = context_pack(task, use_lexis(options));
+    let context = context_pack(task, use_lexis(options), &tools.lexis);
     println!("context:\n{}\n", context.text);
     print_plan(&workflow);
 
     let policy = policy_from_config();
-    let mut dispatcher = build_dispatcher(&workflow, task, &context.text, &agent, &policy);
+    let mut dispatcher =
+        build_dispatcher(&workflow, task, &context.text, &agent, &policy, &tools.claude);
     dispatcher.set_gate(make_gate(opt_in(options.yes, "BIDE_YES")));
     let status = run(&workflow, &mut dispatcher);
 
@@ -147,6 +150,7 @@ fn run_task(options: &RunOptions) -> ExitCode {
         task,
         report_path.as_deref(),
         opt_in(options.pr, "BIDE_PR"),
+        &tools.gh,
     );
 
     match status {
@@ -209,7 +213,13 @@ fn finalize_branch(
 
 /// Push the task branch and open a PR when opted in (BIDE_PR=1). Uses the run
 /// report as the PR body.
-fn maybe_open_pr(branch: Option<&str>, task: &str, report: Option<&Path>, opted_in: bool) {
+fn maybe_open_pr(
+    branch: Option<&str>,
+    task: &str,
+    report: Option<&Path>,
+    opted_in: bool,
+    gh: &str,
+) {
     if !opted_in {
         return;
     }
@@ -221,15 +231,15 @@ fn maybe_open_pr(branch: Option<&str>, task: &str, report: Option<&Path>, opted_
         println!("pr: could not push {branch}");
         return;
     }
-    if open_pr(&pr_title(task), report) {
+    if open_pr(&pr_title(task), report, gh) {
         println!("pr: opened for {branch}");
         return;
     }
     println!("pr: could not open PR (is gh installed and authenticated?)");
 }
 
-fn open_pr(title: &str, report: Option<&Path>) -> bool {
-    let mut command = Process::new("gh");
+fn open_pr(title: &str, report: Option<&Path>, gh: &str) -> bool {
+    let mut command = Process::new(gh);
     command.arg("pr").arg("create").arg("--title").arg(title);
     match report {
         Some(path) => command.arg("--body-file").arg(path),
@@ -304,10 +314,12 @@ fn build_dispatcher(
     context: &str,
     agent: &AgentKind,
     policy: &Policy,
+    claude: &str,
 ) -> Dispatcher {
     let mut dispatcher = Dispatcher::new();
     for step in &workflow.steps {
-        dispatcher.register(&step.name, handler_for(step, task, context, agent, policy));
+        let handler = handler_for(step, task, context, agent, policy, claude);
+        dispatcher.register(&step.name, handler);
     }
     dispatcher
 }
@@ -318,6 +330,7 @@ fn handler_for(
     context: &str,
     agent: &AgentKind,
     policy: &Policy,
+    claude: &str,
 ) -> Box<dyn StepHandler> {
     if let Some(command) = &step.command {
         return Box::new(CommandStep::new(
@@ -328,7 +341,10 @@ fn handler_for(
         ));
     }
     if is_implement_step(step, agent) {
-        return Box::new(ImplementStep::new(task, Box::new(ClaudeCodeImplementer)));
+        return Box::new(ImplementStep::new(
+            task,
+            Box::new(ClaudeCodeImplementer::new(claude)),
+        ));
     }
     let input = format!("{task}\n\nRepository context:\n{context}");
     Box::new(AgentStep::new(&step.name, &input, agent.build()))
@@ -352,19 +368,28 @@ fn policy_from_config() -> Policy {
     }
 }
 
-fn context_pack(task: &str, use_lexis: bool) -> ContextPack {
-    let mut provider = context_provider(use_lexis);
+fn context_pack(task: &str, use_lexis: bool, lexis: &str) -> ContextPack {
+    let mut provider = context_provider(use_lexis, lexis);
     build_context(provider.as_mut(), task)
 }
 
 /// Use Lexis for context when opted in, otherwise none. Keeps `bide run` working
 /// without Lexis installed.
-fn context_provider(use_lexis: bool) -> Box<dyn CodeContext> {
+fn context_provider(use_lexis: bool, lexis: &str) -> Box<dyn CodeContext> {
     if use_lexis {
         let cwd = std::env::current_dir().unwrap_or_default();
-        return Box::new(LexisAsk::new(cwd));
+        return Box::new(LexisAsk::new(cwd, lexis));
     }
     Box::new(NoContext)
+}
+
+/// Tool binaries from the [tools] section of bide.toml, defaulting to PATH names.
+fn tools_from_config() -> ToolSettings {
+    let path = Path::new(CONFIG_PATH);
+    if !path.exists() {
+        return ToolSettings::default();
+    }
+    bide::config::load_tools(path).unwrap_or_default()
 }
 
 struct NoContext;
@@ -378,7 +403,7 @@ impl CodeContext for NoContext {
 /// Which agent backend reasons for this run.
 enum AgentKind {
     Stub,
-    ClaudeCli,
+    ClaudeCli(String),
     Api { settings: AgentSettings, api_key: String },
 }
 
@@ -386,7 +411,7 @@ impl AgentKind {
     fn build(&self) -> Box<dyn AgentRunner> {
         match self {
             AgentKind::Stub => Box::new(StubAgent),
-            AgentKind::ClaudeCli => Box::new(ClaudeCodeAgent::with_cli()),
+            AgentKind::ClaudeCli(program) => Box::new(ClaudeCodeAgent::with_cli(program)),
             AgentKind::Api { settings, api_key } => match settings.provider {
                 Provider::OpenAi => {
                     Box::new(OpenAiAgent::new(api_key.clone(), settings.model.clone()))
@@ -405,7 +430,7 @@ impl AgentKind {
     fn label(&self) -> String {
         match self {
             AgentKind::Stub => "stub".to_string(),
-            AgentKind::ClaudeCli => "claude (cli)".to_string(),
+            AgentKind::ClaudeCli(_) => "claude (cli)".to_string(),
             AgentKind::Api { settings, .. } => format!("{:?} {}", settings.provider, settings.model),
         }
     }
@@ -413,12 +438,12 @@ impl AgentKind {
 
 /// Resolve the agent: an explicit env override wins, then the [agent] section of
 /// bide.toml, otherwise the stub. The API key is read from the named env var.
-fn resolve_agent(flag: Option<&str>) -> Result<AgentKind, String> {
+fn resolve_agent(flag: Option<&str>, claude: &str) -> Result<AgentKind, String> {
     let choice = flag
         .map(str::to_string)
         .or_else(|| std::env::var("BIDE_AGENT").ok());
     match choice.as_deref() {
-        Some("claude") => return Ok(AgentKind::ClaudeCli),
+        Some("claude") => return Ok(AgentKind::ClaudeCli(claude.to_string())),
         Some("stub") => return Ok(AgentKind::Stub),
         Some(other) => return Err(format!("unknown agent: {other} (use claude or stub)")),
         None => {}

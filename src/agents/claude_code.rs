@@ -28,8 +28,10 @@ impl ClaudeCodeAgent {
         ClaudeCodeAgent { process }
     }
 
-    pub fn with_cli() -> Self {
-        ClaudeCodeAgent::new(Box::new(ClaudeCli))
+    pub fn with_cli(program: &str) -> Self {
+        ClaudeCodeAgent::new(Box::new(ClaudeCli {
+            program: program.to_string(),
+        }))
     }
 }
 
@@ -41,12 +43,14 @@ impl AgentRunner for ClaudeCodeAgent {
     }
 }
 
-/// Real process: invokes `claude` in print mode and captures stdout.
-struct ClaudeCli;
+/// Real process: invokes the `claude` binary in print mode and captures stdout.
+struct ClaudeCli {
+    program: String,
+}
 
 impl AgentProcess for ClaudeCli {
     fn run(&mut self, prompt: &str) -> AgentProcessResult {
-        let mut command = Command::new("claude");
+        let mut command = Command::new(&self.program);
         command.arg("--print").arg(prompt);
         let captured = exec::run(command, TIMEOUT);
         // On success the response is on stdout; on failure surface stderr/timeout

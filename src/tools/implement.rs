@@ -60,12 +60,22 @@ pub fn build_implement_prompt(task: &str, board: &Blackboard) -> String {
 
 /// Real driver: runs Claude Code headlessly under a timeout, accepting its edits,
 /// so it changes files in the repo. Only reached when real agents are opted in.
-#[derive(Debug, Default)]
-pub struct ClaudeCodeImplementer;
+#[derive(Debug)]
+pub struct ClaudeCodeImplementer {
+    program: String,
+}
+
+impl ClaudeCodeImplementer {
+    pub fn new(program: &str) -> Self {
+        ClaudeCodeImplementer {
+            program: program.to_string(),
+        }
+    }
+}
 
 impl Implementer for ClaudeCodeImplementer {
     fn implement(&mut self, prompt: &str) -> ImplementResult {
-        let mut command = Command::new("claude");
+        let mut command = Command::new(&self.program);
         command
             .arg("-p")
             .arg(prompt)

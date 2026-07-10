@@ -17,6 +17,12 @@
 # deny_commands = ["terraform destroy", "kubectl delete"]
 # secret_paths = ["config/master.key"]
 
+# Optional. Override the external tool binaries (default: the plain name on PATH).
+# [tools]
+# claude = "/usr/local/bin/claude"
+# lexis = "lexis"
+# gh = "gh"
+
 [workflow]
 # Retries allowed for a retry_from step before the run is marked Failed.
 max_retries = 2

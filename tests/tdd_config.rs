@@ -1,5 +1,19 @@
-use bide::config::{parse, parse_agent, parse_policy, Provider};
+use bide::config::{parse, parse_agent, parse_policy, parse_tools, Provider};
 use bide::OnFailure;
+
+#[test]
+fn parses_a_tools_section_filling_defaults() {
+    let tools = parse_tools("[tools]\nclaude = \"/opt/claude\"\n").expect("valid");
+    assert_eq!(tools.claude, "/opt/claude");
+    assert_eq!(tools.lexis, "lexis");
+    assert_eq!(tools.gh, "gh");
+}
+
+#[test]
+fn tools_default_to_path_names() {
+    let tools = parse_tools("[workflow]\nmax_retries = 0\n").expect("valid");
+    assert_eq!(tools.claude, "claude");
+}
 
 #[test]
 fn parses_a_policy_section() {

@@ -2,10 +2,12 @@ mod agent;
 mod error;
 mod policy;
 mod schema;
+mod tools;
 
 pub use agent::{AgentSettings, Provider};
 pub use error::ConfigError;
 pub use policy::PolicySettings;
+pub use tools::ToolSettings;
 
 use crate::Workflow;
 use std::path::Path;
@@ -36,4 +38,13 @@ pub fn parse_policy(input: &str) -> Result<PolicySettings, ConfigError> {
 pub fn load_policy(path: &Path) -> Result<PolicySettings, ConfigError> {
     let text = std::fs::read_to_string(path)?;
     parse_policy(&text)
+}
+
+pub fn parse_tools(input: &str) -> Result<ToolSettings, ConfigError> {
+    tools::parse(input)
+}
+
+pub fn load_tools(path: &Path) -> Result<ToolSettings, ConfigError> {
+    let text = std::fs::read_to_string(path)?;
+    parse_tools(&text)
 }
