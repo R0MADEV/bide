@@ -18,6 +18,8 @@ pub struct RunRecord {
     pub steps: Vec<StepRecord>,
     pub status: Status,
     pub diff: String,
+    /// The code context captured for the run (lexis/Claude). Saved as context.md.
+    pub context: String,
 }
 
 pub fn render(record: &RunRecord) -> String {
@@ -48,6 +50,9 @@ pub fn save(record: &RunRecord, runs_dir: &Path, id: &str) -> io::Result<PathBuf
     fs::create_dir_all(&dir)?;
     let path = dir.join("report.md");
     fs::write(&path, render(record))?;
+    if !record.context.trim().is_empty() {
+        fs::write(dir.join("context.md"), &record.context)?;
+    }
     save_step_artifacts(&dir, &record.steps)?;
     Ok(path)
 }

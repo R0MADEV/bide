@@ -75,6 +75,7 @@ fn tui_command(options: &RunOptions) -> ExitCode {
     let task = options.task.clone();
     let claude = tools.claude.clone();
     let context_text = context.text;
+    let id = run_id();
     let worker = thread::spawn(move || {
         let mut dispatcher =
             build_dispatcher(&workflow, &task, &context_text, &agent, &policy, &claude);
@@ -83,6 +84,25 @@ fn tui_command(options: &RunOptions) -> ExitCode {
         let mut state = Task::new();
         let status = run_from(&workflow, &mut dispatcher, &mut state);
         let _ = events_tx.send(UiEvent::Finished(status));
+
+        // Persist the run just like the CLI does: state, then report + context.
+        let diff = GitCli.diff();
+        save_state(
+            &id,
+            &RunState {
+                task: task.clone(),
+                cursor: state.cursor(),
+                board: dispatcher.board_entries().to_vec(),
+            },
+        );
+        let record = RunRecord {
+            task,
+            steps: dispatcher.into_records(),
+            status,
+            diff,
+            context: context_text,
+        };
+        let _ = record_run(&record, &id);
     });
 
     let exit = run_ui(step_names, &events_rx, &decisions_tx);
@@ -314,6 +334,7 @@ fn run_task(options: &RunOptions) -> ExitCode {
         steps: dispatcher.into_records(),
         status,
         diff,
+        context: context.text,
     };
     let report_path = record_run(&record, &id);
     maybe_open_pr(

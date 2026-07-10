@@ -6,6 +6,7 @@ fn sample() -> RunRecord {
         task: "add jwt".to_string(),
         status: Status::Failed,
         diff: "diff --git a/src/auth.rs b/src/auth.rs".to_string(),
+        context: "pub fn login() { /* relevant code */ }".to_string(),
         steps: vec![
             StepRecord {
                 name: "plan".to_string(),
@@ -51,6 +52,18 @@ fn save_writes_one_artifact_file_per_step() {
     let content = std::fs::read_to_string(&step_file).expect("read step file");
 
     assert!(content.contains("the plan body"));
+    let _ = std::fs::remove_dir_all(&runs_dir);
+}
+
+#[test]
+fn save_writes_the_captured_context_to_its_own_file() {
+    let runs_dir = std::env::temp_dir().join("bide-test-runs-ctx");
+    let _ = std::fs::remove_dir_all(&runs_dir);
+
+    save(&sample(), &runs_dir, "run-ctx").expect("save");
+    let context = std::fs::read_to_string(runs_dir.join("run-ctx/context.md")).expect("read");
+
+    assert!(context.contains("relevant code"));
     let _ = std::fs::remove_dir_all(&runs_dir);
 }
 
