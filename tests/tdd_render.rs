@@ -118,3 +118,16 @@ fn markdown_answer_renders_headings_and_lists() {
     println!("\n{screen}");
     assert!(screen.contains("Plan"));
 }
+
+#[test]
+fn turns_are_separated_by_a_blank_line() {
+    let mut app = App::new();
+    app.log.push("› first question".to_string());
+    app.log.push("first answer".to_string());
+    app.log.push("› second question".to_string());
+    app.log.push("second answer".to_string());
+    let screen = snapshot(&app, 50, 12);
+    println!("\n{screen}");
+    assert!(screen.contains("first answer"));
+    assert!(screen.contains("second question"));
+}

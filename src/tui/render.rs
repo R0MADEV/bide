@@ -108,6 +108,11 @@ fn transcript_lines(app: &App) -> Vec<Line<'static>> {
         match marker_style(entry) {
             Some(style) => {
                 flush_markdown(&mut block, &mut lines);
+                // A blank line before each of your prompts separates the turns.
+                let starts_a_turn = entry.starts_with("› ") && !lines.is_empty();
+                if starts_a_turn {
+                    lines.push(Line::raw(""));
+                }
                 lines.push(Line::styled(entry.to_string(), style));
             }
             None => block.push(entry),
@@ -175,7 +180,14 @@ fn marker_style(line: &str) -> Option<Style> {
 }
 
 fn transcript_body(app: &App) -> String {
-    let mut body = app.log.join("\n");
+    let mut rows: Vec<&str> = Vec::new();
+    for entry in &app.log {
+        if entry.starts_with("› ") && !rows.is_empty() {
+            rows.push("");
+        }
+        rows.push(entry);
+    }
+    let mut body = rows.join("\n");
     let Some(checkpoint) = &app.checkpoint else {
         return body;
     };
