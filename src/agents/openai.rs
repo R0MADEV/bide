@@ -11,14 +11,16 @@ pub struct OpenAiAgent {
     client: Client,
     api_key: String,
     model: String,
+    max_tokens: u32,
 }
 
 impl OpenAiAgent {
-    pub fn new(api_key: String, model: String) -> Self {
+    pub fn new(api_key: String, model: String, max_tokens: u32) -> Self {
         OpenAiAgent {
             client: Client::new(),
             api_key,
             model,
+            max_tokens,
         }
     }
 
@@ -27,7 +29,7 @@ impl OpenAiAgent {
             .client
             .post(ENDPOINT)
             .bearer_auth(&self.api_key)
-            .json(&build_request_body(&self.model, prompt));
+            .json(&build_request_body(&self.model, prompt, self.max_tokens));
         send_and_extract(request, extract_content)
     }
 }
@@ -40,9 +42,10 @@ impl AgentRunner for OpenAiAgent {
     }
 }
 
-fn build_request_body(model: &str, prompt: &str) -> Value {
+fn build_request_body(model: &str, prompt: &str, max_tokens: u32) -> Value {
     json!({
         "model": model,
+        "max_tokens": max_tokens,
         "messages": [{ "role": "user", "content": prompt }],
     })
 }
@@ -63,9 +66,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn body_carries_the_model_and_user_prompt() {
-        let body = build_request_body("gpt-4o", "hello");
+    fn body_carries_the_model_prompt_and_token_cap() {
+        let body = build_request_body("gpt-4o", "hello", 4096);
         assert_eq!(body["model"], "gpt-4o");
+        assert_eq!(body["max_tokens"], 4096);
         assert_eq!(body["messages"][0]["content"], "hello");
     }
 

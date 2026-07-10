@@ -413,12 +413,16 @@ impl AgentKind {
             AgentKind::Stub => Box::new(StubAgent),
             AgentKind::ClaudeCli(program) => Box::new(ClaudeCodeAgent::with_cli(program)),
             AgentKind::Api { settings, api_key } => match settings.provider {
-                Provider::OpenAi => {
-                    Box::new(OpenAiAgent::new(api_key.clone(), settings.model.clone()))
-                }
-                Provider::Anthropic => {
-                    Box::new(AnthropicAgent::new(api_key.clone(), settings.model.clone()))
-                }
+                Provider::OpenAi => Box::new(OpenAiAgent::new(
+                    api_key.clone(),
+                    settings.model.clone(),
+                    settings.max_tokens,
+                )),
+                Provider::Anthropic => Box::new(AnthropicAgent::new(
+                    api_key.clone(),
+                    settings.model.clone(),
+                    settings.max_tokens,
+                )),
             },
         }
     }

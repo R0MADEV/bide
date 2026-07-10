@@ -6,21 +6,22 @@ use serde_json::{json, Value};
 
 const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
 const VERSION: &str = "2023-06-01";
-const MAX_TOKENS: u32 = 1024;
 
 /// An AgentRunner backed by the Anthropic messages API.
 pub struct AnthropicAgent {
     client: Client,
     api_key: String,
     model: String,
+    max_tokens: u32,
 }
 
 impl AnthropicAgent {
-    pub fn new(api_key: String, model: String) -> Self {
+    pub fn new(api_key: String, model: String, max_tokens: u32) -> Self {
         AnthropicAgent {
             client: Client::new(),
             api_key,
             model,
+            max_tokens,
         }
     }
 
@@ -30,7 +31,7 @@ impl AnthropicAgent {
             .post(ENDPOINT)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", VERSION)
-            .json(&build_request_body(&self.model, prompt));
+            .json(&build_request_body(&self.model, prompt, self.max_tokens));
         send_and_extract(request, extract_content)
     }
 }
@@ -43,10 +44,10 @@ impl AgentRunner for AnthropicAgent {
     }
 }
 
-fn build_request_body(model: &str, prompt: &str) -> Value {
+fn build_request_body(model: &str, prompt: &str, max_tokens: u32) -> Value {
     json!({
         "model": model,
-        "max_tokens": MAX_TOKENS,
+        "max_tokens": max_tokens,
         "messages": [{ "role": "user", "content": prompt }],
     })
 }
@@ -63,9 +64,9 @@ mod tests {
 
     #[test]
     fn body_carries_model_max_tokens_and_prompt() {
-        let body = build_request_body("claude-sonnet-4-6", "hello");
+        let body = build_request_body("claude-sonnet-4-6", "hello", 4096);
         assert_eq!(body["model"], "claude-sonnet-4-6");
-        assert_eq!(body["max_tokens"], MAX_TOKENS);
+        assert_eq!(body["max_tokens"], 4096);
         assert_eq!(body["messages"][0]["content"], "hello");
     }
 

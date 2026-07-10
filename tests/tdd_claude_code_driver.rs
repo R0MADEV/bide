@@ -70,6 +70,6 @@ fn the_prompt_carries_the_role_task_and_verdict_contract() {
 fn the_prompt_is_tailored_to_the_role() {
     assert!(build_prompt("critic", "x").contains("Critique"));
     assert!(build_prompt("plan", "x").to_lowercase().contains("plan"));
-    assert!(build_prompt("review", "x").contains("Evaluate"));
+    assert!(build_prompt("review", "x").contains("diff"));
     assert!(build_prompt("fix_plan", "x").contains("repair"));
 }

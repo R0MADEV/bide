@@ -17,20 +17,27 @@ pub fn build_prompt(role: &str, input: &str) -> String {
 fn role_instruction(role: &str) -> &'static str {
     match role {
         "plan" | "planner" => {
-            "Produce a concrete, minimal plan: the steps to take, the files likely touched, \
-             the checks to run and the risks. Prefer the simplest approach that works."
+            "Produce a concrete, minimal implementation plan as a numbered list. For each step \
+             give the files likely touched and why. End with a `Checks:` line (commands to run) \
+             and a `Risks:` line. Prefer the simplest approach that works; do not over-engineer. \
+             Always PROCEED unless the task is impossible or unsafe."
         }
         "critic" => {
-            "Critique the plan on the blackboard: find errors, risks, over-engineering and \
-             architecture violations. Reject it if it is unsound."
+            "Critique the plan shown under 'Prior steps'. Look for correctness gaps, missing \
+             steps, over-engineering, and architecture or convention violations. If the plan is \
+             sound, PROCEED. If it is not, REJECT with a one-line reason naming the biggest flaw \
+             so the planner can redo it."
         }
         "review" | "reviewer" => {
-            "Evaluate the changes against the plan: correctness, quality, architecture and \
-             maintainability. Reject them if they are not good enough."
+            "Review the code changes in the `diff` output under 'Prior steps' against the plan. \
+             Judge correctness, quality, architecture and maintainability. If the changes are \
+             good and match the plan, PROCEED. Otherwise REJECT with a one-line reason naming \
+             what must change, so the implementer can fix it."
         }
         "fix_plan" | "fix_planner" => {
-            "Read the failure output on the blackboard and propose a concrete, minimal repair \
-             strategy. Do not implement it, only recommend."
+            "Read the failure output under 'Prior steps' and propose a concrete, minimal repair: \
+             the likely cause and the smallest change that fixes it. Recommend only; do not \
+             implement. PROCEED with the recommendation."
         }
         _ => "Do your job for the task below.",
     }
