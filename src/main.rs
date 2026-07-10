@@ -2,7 +2,7 @@ use bide::agents::{
     AgentRequest, AgentResponse, AgentRunner, AgentStep, AnthropicAgent, ClaudeCodeAgent,
     OpenAiAgent, Verdict,
 };
-use bide::cli::{parse, Command, RunOptions};
+use bide::cli::{confirmed, parse, Command, RunOptions};
 use bide::config::{AgentSettings, Provider, ToolSettings};
 use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, ClaudeContext, CodeContext, ContextPack, LexisAsk};
@@ -313,7 +313,7 @@ fn help() -> ExitCode {
            bide tui \"<task>\" [flags]   run a task in the interactive UI\n  \
            bide init                   scaffold a starter bide.toml here\n  \
            bide doctor\n  \
-           bide clean                  empty .bide/runs (delete all saved runs)\n  \
+           bide clean                  empty .bide/runs (delete all saved runs, asks to confirm)\n  \
            bide help\n\n\
          Run flags (each also has a BIDE_* env var):\n  \
            --yes, -y           run straight through, no interactive checkpoints\n  \
@@ -327,7 +327,12 @@ fn help() -> ExitCode {
 }
 
 /// Empty `.bide/runs`, deleting every saved run folder, and report the count.
+/// Deletion is irreversible, so ask for confirmation first.
 fn clean() -> ExitCode {
+    if !prompt_confirmation("delete all saved runs") {
+        println!("cancelled");
+        return ExitCode::SUCCESS;
+    }
     match clean_runs(Path::new(RUNS_DIR)) {
         Ok(removed) => {
             println!("removed {removed} run{}", if removed == 1 { "" } else { "s" });
@@ -338,6 +343,18 @@ fn clean() -> ExitCode {
             ExitCode::from(1)
         }
     }
+}
+
+/// Print a "<action>? (y/N): " prompt and read the answer from stdin.
+/// Returns whether the user confirmed. A read failure counts as "no".
+fn prompt_confirmation(action: &str) -> bool {
+    print!("{action}? (y/N): ");
+    let _ = io::stdout().flush();
+    let mut answer = String::new();
+    if io::stdin().read_line(&mut answer).is_err() {
+        return false;
+    }
+    confirmed(&answer)
 }
 
 fn opt_in(flag: bool, env: &str) -> bool {

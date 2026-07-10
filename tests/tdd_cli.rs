@@ -1,4 +1,4 @@
-use bide::cli::{parse, Command, RunOptions};
+use bide::cli::{confirmed, parse, Command, RunOptions};
 
 fn args(items: &[&str]) -> std::vec::IntoIter<String> {
     items
@@ -101,4 +101,21 @@ fn an_unknown_flag_is_an_error() {
 #[test]
 fn unknown_command_is_an_error() {
     assert!(parse(args(&["frobnicate"])).is_err());
+}
+
+#[test]
+fn confirmation_accepts_only_yes() {
+    assert!(confirmed("y"));
+    assert!(confirmed("Y"));
+    assert!(confirmed("y\n"));
+    assert!(confirmed("  y  "));
+}
+
+#[test]
+fn confirmation_rejects_anything_else() {
+    assert!(!confirmed("n"));
+    assert!(!confirmed("N"));
+    assert!(!confirmed(""));
+    assert!(!confirmed("yes"));
+    assert!(!confirmed("nope"));
 }

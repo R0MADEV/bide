@@ -77,3 +77,9 @@ fn value(args: &[String], index: usize, flag: &str) -> Result<String, String> {
         .cloned()
         .ok_or_else(|| format!("{flag} needs a value"))
 }
+
+/// A y/N prompt is confirmed only by an explicit "y" (case-insensitive).
+/// Anything else — "n", empty input, garbage — leaves the default: no.
+pub fn confirmed(answer: &str) -> bool {
+    answer.trim().eq_ignore_ascii_case("y")
+}
