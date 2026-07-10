@@ -111,6 +111,32 @@ fn an_answer_event_is_stored() {
 }
 
 #[test]
+fn arrows_scroll_the_bottom_panel() {
+    let mut app = App::new();
+    assert_eq!(app.scroll, 0);
+    app.on_key(Key::Down);
+    app.on_key(Key::Down);
+    assert_eq!(app.scroll, 2);
+    app.on_key(Key::Up);
+    assert_eq!(app.scroll, 1);
+    // Scrolling up past the top stays at zero.
+    app.on_key(Key::Up);
+    app.on_key(Key::Up);
+    assert_eq!(app.scroll, 0);
+}
+
+#[test]
+fn new_content_resets_scroll() {
+    let mut app = App::new();
+    app.start_question();
+    app.on_key(Key::Down);
+    app.on_key(Key::Down);
+    assert_eq!(app.scroll, 2);
+    app.apply(UiEvent::Answer("a long answer".to_string()));
+    assert_eq!(app.scroll, 0);
+}
+
+#[test]
 fn finishing_returns_to_input_mode() {
     let mut app = App::new();
     app.start_run(vec!["plan".to_string()]);

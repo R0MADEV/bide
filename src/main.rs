@@ -24,12 +24,15 @@ use bide::{run_from, Status, Step, StepOutcome, Task, Workflow};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use bide::route::Turn;
 
 const CONFIG_PATH: &str = "bide.toml";
 const RUNS_DIR: &str = ".bide/runs";
 const IMPLEMENT_STEP: &str = "implement";
 const KEEP_RUNS: usize = 20;
+/// Braille frames for the "working…" spinner, one per redraw tick.
+const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 fn main() -> ExitCode {
     let command = match parse(std::env::args().skip(1)) {
@@ -67,10 +70,16 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
     let mut terminal = ratatui::init();
     let mut app = App::new();
     let mut active: Option<ActiveRun> = None;
+    // Past exchanges, so a follow-up question carries context.
+    let mut history: Vec<Turn> = Vec::new();
+    // The input awaiting an answer, and when it started (for the elapsed timer).
+    let mut pending: Option<(String, Instant)> = None;
+    let mut tick: usize = 0;
 
     if let Some(task) = autostart {
         if !task.trim().is_empty() {
-            active = Some(spawn_route(&task, options, &mut app));
+            pending = Some((task.clone(), Instant::now()));
+            active = Some(spawn_route(&task, options, &history, &mut app));
         }
     }
 
@@ -83,9 +92,12 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
                 if let Some(run) = active.take() {
                     let _ = run.handle.join();
                 }
+                remember(&mut history, &mut pending, &app);
             }
         }
-        let _ = terminal.draw(|frame| render(frame, &app));
+        tick = tick.wrapping_add(1);
+        let elapsed = pending.as_ref().map(|(_, started)| started.elapsed());
+        let _ = terminal.draw(|frame| render(frame, &app, tick, elapsed));
 
         if !event::poll(Duration::from_millis(80)).unwrap_or(false) {
             continue;
@@ -101,7 +113,10 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
         };
         match app.on_key(mapped) {
             Reaction::Quit => break,
-            Reaction::Submit(text) => active = Some(spawn_route(&text, options, &mut app)),
+            Reaction::Submit(text) => {
+                pending = Some((text.clone(), Instant::now()));
+                active = Some(spawn_route(&text, options, &history, &mut app));
+            }
             Reaction::Decide(control) => {
                 if let Some(run) = &active {
                     let _ = run.decisions.send(control);
@@ -115,14 +130,30 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// When a run ends, record it as a turn if it produced an answer (a question),
+/// so the next follow-up has context. Tasks produce no answer and are skipped.
+fn remember(history: &mut Vec<Turn>, pending: &mut Option<(String, Instant)>, app: &App) {
+    let Some((question, _)) = pending.take() else {
+        return;
+    };
+    let Some(answer) = &app.answer else {
+        return;
+    };
+    history.push(Turn {
+        question,
+        answer: answer.clone(),
+    });
+}
+
 /// Spawn a worker that first lets the AI decide whether the input is a QUESTION
 /// (answer it with Claude+lexis) or a TASK (run the workflow) — no `?` needed.
-fn spawn_route(input: &str, options: &RunOptions, app: &mut App) -> ActiveRun {
+fn spawn_route(input: &str, options: &RunOptions, history: &[Turn], app: &mut App) -> ActiveRun {
     app.start_question();
 
     let (events_tx, events) = mpsc::channel::<UiEvent>();
     let (decisions, decisions_rx) = mpsc::channel::<Control>();
     let input = input.to_string();
+    let history = history.to_vec();
     let agent_flag = options.agent.clone();
     let context_flag = context_choice(options);
     let handle = thread::spawn(move || {
@@ -140,7 +171,7 @@ fn spawn_route(input: &str, options: &RunOptions, app: &mut App) -> ActiveRun {
             return;
         }
         // Otherwise ask Claude+lexis: it answers a question, or replies TASK.
-        let reply = bide::context::ask_claude(&tools.claude, &route_prompt(&input));
+        let reply = bide::context::ask_claude(&tools.claude, &bide::route::route_prompt(&history, &input));
         let is_task = reply.trim().eq_ignore_ascii_case("TASK") || reply.trim().starts_with("TASK");
         if is_task {
             run_workflow_worker(
@@ -167,15 +198,6 @@ fn spawn_route(input: &str, options: &RunOptions, app: &mut App) -> ActiveRun {
         decisions,
         handle,
     }
-}
-
-fn route_prompt(input: &str) -> String {
-    format!(
-        "A user typed this into a coding tool: \"{input}\"\n\nIf it is a QUESTION \
-         about the codebase, answer it clearly using the lexis tools to read the \
-         real code. If it is a request to CHANGE, ADD or FIX code (a task to do), \
-         reply with EXACTLY the single word TASK and nothing else."
-    )
 }
 
 /// Resolve config and run the workflow inside a worker, streaming UI events and
@@ -236,12 +258,14 @@ fn map_key(code: KeyCode) -> Option<TuiKey> {
         KeyCode::Enter => Some(TuiKey::Enter),
         KeyCode::Esc => Some(TuiKey::Esc),
         KeyCode::Backspace => Some(TuiKey::Backspace),
+        KeyCode::Up => Some(TuiKey::Up),
+        KeyCode::Down => Some(TuiKey::Down),
         KeyCode::Char(c) => Some(TuiKey::Char(c)),
         _ => None,
     }
 }
 
-fn render(frame: &mut Frame, app: &App) {
+fn render(frame: &mut Frame, app: &App, tick: usize, elapsed: Option<Duration>) {
     let areas =
         Layout::vertical([Constraint::Percentage(45), Constraint::Min(0)]).split(frame.area());
 
@@ -259,22 +283,26 @@ fn render(frame: &mut Frame, app: &App) {
         })
         .collect();
     frame.render_widget(List::new(items).block(Block::bordered().title(" bide ")), areas[0]);
-    frame.render_widget(bottom_panel(app), areas[1]);
+    frame.render_widget(bottom_panel(app, tick, elapsed), areas[1]);
 }
 
-fn bottom_panel(app: &App) -> Paragraph<'static> {
+fn bottom_panel(app: &App, tick: usize, elapsed: Option<Duration>) -> Paragraph<'static> {
     if let Some(checkpoint) = &app.checkpoint {
         return Paragraph::new(format!(
-            "SENT TO AI:\n{}\n\nRESPONSE:\n{}\n\n> feedback: {}\n\n[Enter] continue (or re-plan with feedback)   [Esc] abort",
+            "SENT TO AI:\n{}\n\nRESPONSE:\n{}\n\n> feedback: {}\n\n[↑/↓] scroll   [Enter] continue (or re-plan with feedback)   [Esc] abort",
             checkpoint.prompt.trim(),
             checkpoint.output.trim(),
             app.feedback
         ))
         .block(Block::bordered().title(format!(" checkpoint: {} ", checkpoint.step)))
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((app.scroll, 0));
     }
     if app.mode == Mode::Running {
-        return Paragraph::new("working…").block(Block::bordered().title(" status "));
+        let spin = SPINNER[tick % SPINNER.len()];
+        let secs = elapsed.map(|e| e.as_secs()).unwrap_or(0);
+        return Paragraph::new(format!("{spin} working… {secs}s"))
+            .block(Block::bordered().title(" status "));
     }
     // Input mode: show the last answer/result and the prompt line.
     let mut body = String::new();
@@ -285,12 +313,13 @@ fn bottom_panel(app: &App) -> Paragraph<'static> {
         body.push_str(&format!("finished: {status:?}\n\n"));
     }
     body.push_str(&format!(
-        "> {}\n\n[Enter] send — bide decides: question → answered, task → workflow   [Esc] quit",
+        "> {}\n\n[↑/↓] scroll   [Enter] send — bide decides: question → answered, task → workflow   [Esc] quit",
         app.input
     ));
     Paragraph::new(body)
         .block(Block::bordered().title(" bide "))
         .wrap(Wrap { trim: false })
+        .scroll((app.scroll, 0))
 }
 
 fn help() -> ExitCode {

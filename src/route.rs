@@ -20,6 +20,38 @@ const QUESTION_WORDS: &[&str] = &[
     "cuándo", "cuando", "cuál", "cual", "quién", "quien", "explica", "muestra",
 ];
 
+/// One past REPL exchange, so a follow-up question can carry context.
+#[derive(Debug, Clone)]
+pub struct Turn {
+    pub question: String,
+    pub answer: String,
+}
+
+/// How many recent turns to replay, so the prompt stays small.
+const MEMORY_TURNS: usize = 4;
+
+/// The prompt that classifies the input (answer a question with lexis, or reply
+/// TASK), prefixed with the recent conversation so a follow-up like "and where
+/// is that used?" has the context it needs.
+pub fn route_prompt(history: &[Turn], input: &str) -> String {
+    let mut prompt = String::new();
+    let recent = &history[history.len().saturating_sub(MEMORY_TURNS)..];
+    if !recent.is_empty() {
+        prompt.push_str("Earlier in this conversation:\n");
+        for turn in recent {
+            prompt.push_str(&format!("Q: {}\nA: {}\n", turn.question.trim(), turn.answer.trim()));
+        }
+        prompt.push('\n');
+    }
+    prompt.push_str(&format!(
+        "A user typed this into a coding tool: \"{input}\"\n\nIf it is a QUESTION \
+         about the codebase, answer it clearly using the lexis tools to read the \
+         real code. If it is a request to CHANGE, ADD or FIX code (a task to do), \
+         reply with EXACTLY the single word TASK and nothing else."
+    ));
+    prompt
+}
+
 pub fn guess(input: &str) -> Option<Guess> {
     let text = input.trim();
     if text.is_empty() {

@@ -43,6 +43,8 @@ pub enum Key {
     Enter,
     Esc,
     Backspace,
+    Up,
+    Down,
     Char(char),
 }
 
@@ -78,6 +80,9 @@ pub struct App {
     pub feedback: String,
     pub answer: Option<String>,
     pub done: Option<Status>,
+    /// How far the bottom panel is scrolled, in lines. Reset when new content
+    /// (an answer, a checkpoint, a fresh run) arrives.
+    pub scroll: u16,
 }
 
 impl Default for App {
@@ -90,6 +95,7 @@ impl Default for App {
             feedback: String::new(),
             answer: None,
             done: None,
+            scroll: 0,
         }
     }
 }
@@ -113,6 +119,7 @@ impl App {
         self.feedback.clear();
         self.answer = None;
         self.done = None;
+        self.scroll = 0;
     }
 
     /// Begin a question (Claude + lexis); no workflow steps.
@@ -122,6 +129,7 @@ impl App {
         self.checkpoint = None;
         self.answer = None;
         self.done = None;
+        self.scroll = 0;
     }
 
     pub fn apply(&mut self, event: UiEvent) {
@@ -148,8 +156,12 @@ impl App {
                     output,
                 });
                 self.feedback.clear();
+                self.scroll = 0;
             }
-            UiEvent::Answer(text) => self.answer = Some(text),
+            UiEvent::Answer(text) => {
+                self.answer = Some(text);
+                self.scroll = 0;
+            }
             UiEvent::Finished(status) => {
                 self.done = Some(status);
                 self.mode = Mode::Input;
@@ -158,6 +170,18 @@ impl App {
     }
 
     pub fn on_key(&mut self, key: Key) -> Reaction {
+        // Arrows scroll the bottom panel in any mode; they never type.
+        match key {
+            Key::Up => {
+                self.scroll = self.scroll.saturating_sub(1);
+                return Reaction::None;
+            }
+            Key::Down => {
+                self.scroll = self.scroll.saturating_add(1);
+                return Reaction::None;
+            }
+            _ => {}
+        }
         match self.mode {
             Mode::Running => self.on_key_running(key),
             Mode::Input => self.on_key_input(key),
@@ -182,6 +206,7 @@ impl App {
                 self.feedback.push(c);
                 Reaction::None
             }
+            _ => Reaction::None,
         }
     }
 
@@ -197,6 +222,7 @@ impl App {
                 self.input.push(c);
                 Reaction::None
             }
+            _ => Reaction::None,
         }
     }
 
