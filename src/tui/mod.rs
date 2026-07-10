@@ -50,6 +50,8 @@ pub enum UiEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
     Enter,
+    /// Shift/Alt+Enter: insert a line break instead of submitting.
+    Newline,
     Esc,
     Backspace,
     Up,
@@ -247,6 +249,10 @@ impl App {
         }
         match key {
             Key::Enter => Reaction::Decide(self.resolve()),
+            Key::Newline => {
+                self.feedback.push('\n');
+                Reaction::None
+            }
             Key::Esc => {
                 self.close();
                 Reaction::Decide(Control::Abort)
@@ -277,6 +283,10 @@ impl App {
         match key {
             Key::Esc => Reaction::Quit,
             Key::Enter => self.submit(),
+            Key::Newline => {
+                self.input.push('\n');
+                Reaction::None
+            }
             Key::Backspace => {
                 self.input.pop();
                 Reaction::None

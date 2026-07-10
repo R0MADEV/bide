@@ -109,7 +109,7 @@ fn input_line(app: &App, view: &View) -> Paragraph<'static> {
         ));
     }
     bar(format!(
-        "› {}    [Enter] send · [Esc] quit",
+        "› {}    [Enter] send · [⇧↵] newline · [Esc] quit",
         one_line(&app.input)
     ))
     .block(Block::bordered().title(" bide "))

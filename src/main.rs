@@ -9,7 +9,8 @@ use bide::context::{build_context, ClaudeContext, CodeContext, ContextPack, Lexi
 use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, Observer, StepHandler, StepReport};
 use bide::tui::{App, ChannelGate, ChannelObserver, Key as TuiKey, Mode, Reaction, UiEvent};
 use ratatui::crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind, KeyModifiers,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::execute;
 use bide::tui::render::{draw, View};
@@ -70,8 +71,13 @@ struct ActiveRun {
 fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
     let mut terminal = ratatui::init();
     // Bracketed paste, so a multi-line paste arrives as one block instead of the
-    // first newline submitting it early.
-    let _ = execute!(io::stdout(), EnableBracketedPaste);
+    // first newline submitting it early. The keyboard enhancement lets capable
+    // terminals report Shift/Alt+Enter distinctly (for inserting a line break).
+    let _ = execute!(
+        io::stdout(),
+        EnableBracketedPaste,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
     let mut app = App::new();
     let mut active: Option<ActiveRun> = None;
     // Past exchanges, so a follow-up question carries context.
@@ -128,7 +134,7 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
         if key.kind != KeyEventKind::Press {
             continue;
         }
-        let Some(mapped) = map_key(key.code) else {
+        let Some(mapped) = map_key(key.code, key.modifiers) else {
             continue;
         };
         match app.on_key(mapped) {
@@ -146,7 +152,11 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
         }
     }
 
-    let _ = execute!(io::stdout(), DisableBracketedPaste);
+    let _ = execute!(
+        io::stdout(),
+        PopKeyboardEnhancementFlags,
+        DisableBracketedPaste
+    );
     ratatui::restore();
     ExitCode::SUCCESS
 }
@@ -293,8 +303,10 @@ fn finish_with_error(events_tx: &Sender<UiEvent>, message: &str) {
     let _ = events_tx.send(UiEvent::Finished(Status::Failed));
 }
 
-fn map_key(code: KeyCode) -> Option<TuiKey> {
+fn map_key(code: KeyCode, modifiers: KeyModifiers) -> Option<TuiKey> {
+    let inserts_newline = modifiers.contains(KeyModifiers::SHIFT) || modifiers.contains(KeyModifiers::ALT);
     match code {
+        KeyCode::Enter if inserts_newline => Some(TuiKey::Newline),
         KeyCode::Enter => Some(TuiKey::Enter),
         KeyCode::Esc => Some(TuiKey::Esc),
         KeyCode::Backspace => Some(TuiKey::Backspace),

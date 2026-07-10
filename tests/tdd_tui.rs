@@ -26,6 +26,20 @@ fn typing_and_enter_submits_the_text() {
 }
 
 #[test]
+fn newline_inserts_a_line_break_without_submitting() {
+    let mut app = App::new();
+    typed(&mut app, "line one");
+    app.on_key(Key::Newline);
+    typed(&mut app, "line two");
+    assert_eq!(app.input, "line one\nline two");
+    // Enter still submits the whole thing.
+    assert_eq!(
+        app.on_key(Key::Enter),
+        Reaction::Submit("line one\nline two".to_string())
+    );
+}
+
+#[test]
 fn pasting_multiline_text_fills_the_input_without_submitting() {
     let mut app = App::new();
     app.paste("first line\nsecond line");
