@@ -53,12 +53,11 @@ pub struct Workflow {
 
 impl Workflow {
     pub fn default_recipe() -> Self {
-        let plan = 1;
-        let implement = 3;
+        let plan = 0;
+        let implement = 2;
         Workflow {
             max_retries: 3,
             steps: vec![
-                Step::abort("build_context"),
                 Step::abort("plan").with_pause(), // stop so you can review the plan
                 Step::retry_from("critic", plan), // reject -> re-plan
                 Step::abort("implement"),

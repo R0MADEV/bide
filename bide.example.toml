@@ -29,10 +29,6 @@
 max_retries = 3
 
 [[workflow.step]]
-name = "build_context"
-on_failure = "abort"
-
-[[workflow.step]]
 name = "plan"
 on_failure = "abort"
 # A checkpoint: bide stops here after the step so you can review it and
