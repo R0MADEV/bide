@@ -37,7 +37,7 @@ fn a_retry_at_a_checkpoint_re_runs_the_step() {
     let mut dispatcher = Dispatcher::new();
     dispatcher.register("implement", Box::new(AlwaysOk));
     dispatcher.set_gate(Box::new(ScriptedGate {
-        decisions: vec![Control::Retry, Control::Continue],
+        decisions: vec![Control::Retry(String::new()), Control::Continue],
     }));
 
     let status = run(&workflow, &mut dispatcher);
@@ -49,6 +49,27 @@ fn a_retry_at_a_checkpoint_re_runs_the_step() {
         .filter(|record| record.name == "implement")
         .count();
     assert_eq!(ran, 2); // ran once, retried once
+}
+
+#[test]
+fn retry_feedback_is_recorded_so_the_re_run_sees_it() {
+    let workflow = Workflow {
+        steps: vec![checkpoint("plan")],
+        max_retries: 0,
+    };
+    let mut dispatcher = Dispatcher::new();
+    dispatcher.register("plan", Box::new(AlwaysOk));
+    dispatcher.set_gate(Box::new(ScriptedGate {
+        decisions: vec![Control::Retry("make it simpler".to_string()), Control::Continue],
+    }));
+
+    run(&workflow, &mut dispatcher);
+
+    let recorded = dispatcher
+        .board_entries()
+        .iter()
+        .any(|(name, output)| name == "feedback" && output == "make it simpler");
+    assert!(recorded);
 }
 
 #[test]

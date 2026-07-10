@@ -25,11 +25,12 @@ pub trait StepHandler {
     fn handle(&mut self, step: &Step, board: &Blackboard) -> StepReport;
 }
 
-/// What the user decides at a checkpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What the user decides at a checkpoint. Retry carries optional feedback that is
+/// fed back to the step (via the blackboard) so it can be re-run with guidance.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Control {
     Continue,
-    Retry,
+    Retry(String),
     Abort,
 }
 
@@ -148,7 +149,11 @@ impl StepRunner for Dispatcher {
             match self.gate.checkpoint(step, &report) {
                 Control::Continue => return outcome,
                 Control::Abort => return StepOutcome::Aborted,
-                Control::Retry => continue,
+                Control::Retry(feedback) => {
+                    if !feedback.trim().is_empty() {
+                        self.board.record("feedback", &feedback);
+                    }
+                }
             }
         }
     }

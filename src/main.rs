@@ -588,11 +588,21 @@ impl Gate for PromptGate {
             return Control::Abort;
         }
         match answer.trim() {
-            "r" | "retry" => Control::Retry,
+            "r" | "retry" => Control::Retry(prompt_feedback()),
             "a" | "abort" => Control::Abort,
             _ => Control::Continue,
         }
     }
+}
+
+fn prompt_feedback() -> String {
+    print!("      feedback (optional, enter to skip): ");
+    let _ = io::stdout().flush();
+    let mut feedback = String::new();
+    if io::stdin().read_line(&mut feedback).is_err() {
+        return String::new();
+    }
+    feedback.trim().to_string()
 }
 
 /// Confirms a policy-flagged command on the terminal.
