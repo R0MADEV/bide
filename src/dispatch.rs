@@ -47,6 +47,14 @@ pub enum Control {
 /// gate asks the user; the auto gate always continues.
 pub trait Gate {
     fn checkpoint(&mut self, step: &Step, report: &StepReport) -> Control;
+
+    /// A retry_from loop spent its budget. By default, offer the same choice as
+    /// a checkpoint — continue keeps retrying, abort gives up — so an interactive
+    /// gate asks the human for free. The auto gate overrides this to give up,
+    /// keeping `--yes` (unattended) runs bounded.
+    fn retry_limit(&mut self, step: &Step, report: &StepReport) -> bool {
+        !matches!(self.checkpoint(step, report), Control::Abort)
+    }
 }
 
 pub struct AutoGate;
@@ -54,6 +62,10 @@ pub struct AutoGate;
 impl Gate for AutoGate {
     fn checkpoint(&mut self, _step: &Step, _report: &StepReport) -> Control {
         Control::Continue
+    }
+
+    fn retry_limit(&mut self, _step: &Step, _report: &StepReport) -> bool {
+        false
     }
 }
 
@@ -166,5 +178,15 @@ impl StepRunner for Dispatcher {
                 }
             }
         }
+    }
+
+    fn on_retry_limit(&mut self, step: &Step) -> bool {
+        let last = self.records.last();
+        let output = last.map(|record| record.output.as_str()).unwrap_or("");
+        let report = StepReport::new(
+            StepOutcome::Failure,
+            format!("retry budget spent for '{}' — keep retrying, or abort?\n\n{output}", step.name),
+        );
+        self.gate.retry_limit(step, &report)
     }
 }

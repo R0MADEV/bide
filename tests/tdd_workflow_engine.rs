@@ -122,3 +122,49 @@ fn retry_from_fails_once_the_limit_is_exhausted() {
     let verify_attempts = runner.visited.iter().filter(|s| *s == "verify").count();
     assert_eq!(verify_attempts, 3); // first attempt + 2 retries
 }
+
+/// Fails one named step forever, and grants "keep going" at the retry limit a
+/// fixed number of times — a stand-in for a human who says continue, then stops.
+struct InteractiveRunner {
+    visited: Vec<String>,
+    fail: String,
+    grants: u32,
+}
+
+impl StepRunner for InteractiveRunner {
+    fn run(&mut self, step: &Step) -> StepOutcome {
+        self.visited.push(step.name.clone());
+        if step.name == self.fail {
+            return StepOutcome::Failure;
+        }
+        StepOutcome::Success
+    }
+
+    fn on_retry_limit(&mut self, _step: &Step) -> bool {
+        if self.grants == 0 {
+            return false;
+        }
+        self.grants -= 1;
+        true
+    }
+}
+
+#[test]
+fn an_interactive_runner_keeps_going_past_the_limit_then_gives_up() {
+    let workflow = pipeline(
+        vec![Step::abort("implement"), Step::retry_from("verify", 0)],
+        2,
+    );
+    let mut runner = InteractiveRunner {
+        visited: Vec::new(),
+        fail: "verify".to_string(),
+        grants: 1,
+    };
+
+    let status = run(&workflow, &mut runner);
+
+    assert_eq!(status, Status::Failed); // gave up after the one granted extension
+    let verify_attempts = runner.visited.iter().filter(|s| *s == "verify").count();
+    // 3 (first budget) + 3 more (the granted extension) = past the bounded 3.
+    assert_eq!(verify_attempts, 6);
+}
