@@ -6,12 +6,12 @@ use bide::cli::{parse, Command, RunOptions};
 use bide::config::{AgentSettings, Provider, ToolSettings};
 use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
-use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, StepHandler, StepReport};
+use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, Observer, StepHandler, StepReport};
 use bide::git::{branch_name, commit_message, pr_title, Git, GitCli};
 use bide::policy::Policy;
 use bide::report::{save, RunRecord};
 use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, ProcessShell};
-use bide::{run, Status, Step, Workflow};
+use bide::{run, Status, Step, StepOutcome, Workflow};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
@@ -133,6 +133,7 @@ fn run_task(options: &RunOptions) -> ExitCode {
     let mut dispatcher =
         build_dispatcher(&workflow, task, &context.text, &agent, &policy, &tools.claude);
     dispatcher.set_gate(make_gate(opt_in(options.yes, "BIDE_YES")));
+    dispatcher.set_observer(Box::new(PrintObserver));
     let status = run(&workflow, &mut dispatcher);
 
     println!("\nfinished: {status:?}");
@@ -484,6 +485,21 @@ impl AgentRunner for StubAgent {
             output: format!("(stub {} for: {})", request.role, request.input),
             verdict: Verdict::Proceed,
         }
+    }
+}
+
+/// Prints live progress as each step runs, so long steps (an agent thinking,
+/// tests running) do not look frozen.
+struct PrintObserver;
+
+impl Observer for PrintObserver {
+    fn step_started(&mut self, step: &Step) {
+        print!("→ {} … ", step.name);
+        let _ = io::stdout().flush();
+    }
+
+    fn step_finished(&mut self, _step: &Step, outcome: StepOutcome) {
+        println!("{outcome:?}");
     }
 }
 

@@ -47,6 +47,17 @@ impl Gate for AutoGate {
     }
 }
 
+/// Observes the run as it happens. The CLI prints progress; a desktop frontend
+/// can forward these as UI events. Methods default to doing nothing.
+pub trait Observer {
+    fn step_started(&mut self, _step: &Step) {}
+    fn step_finished(&mut self, _step: &Step, _outcome: StepOutcome) {}
+}
+
+pub struct Silent;
+
+impl Observer for Silent {}
+
 /// Routes each step to its handler, feeds it the blackboard, records what every
 /// step produced, and stops at checkpoints so the user can steer.
 pub struct Dispatcher {
@@ -54,6 +65,7 @@ pub struct Dispatcher {
     records: Vec<StepRecord>,
     board: Blackboard,
     gate: Box<dyn Gate>,
+    observer: Box<dyn Observer>,
 }
 
 impl Default for Dispatcher {
@@ -63,6 +75,7 @@ impl Default for Dispatcher {
             records: Vec::new(),
             board: Blackboard::new(),
             gate: Box::new(AutoGate),
+            observer: Box::new(Silent),
         }
     }
 }
@@ -79,6 +92,11 @@ impl Dispatcher {
 
     pub fn set_gate(&mut self, gate: Box<dyn Gate>) -> &mut Self {
         self.gate = gate;
+        self
+    }
+
+    pub fn set_observer(&mut self, observer: Box<dyn Observer>) -> &mut Self {
+        self.observer = observer;
         self
     }
 
@@ -106,8 +124,10 @@ impl Dispatcher {
 impl StepRunner for Dispatcher {
     fn run(&mut self, step: &Step) -> StepOutcome {
         loop {
+            self.observer.step_started(step);
             let report = self.handle(step);
             let outcome = report.outcome;
+            self.observer.step_finished(step, outcome);
             self.record(step, &report);
 
             if !step.pause {
