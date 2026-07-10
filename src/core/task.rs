@@ -16,6 +16,10 @@ impl Task {
         }
     }
 
+    pub fn resumed(cursor: usize) -> Self {
+        Task { cursor, retries: 0 }
+    }
+
     pub fn cursor(&self) -> usize {
         self.cursor
     }

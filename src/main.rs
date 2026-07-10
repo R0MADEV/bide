@@ -11,7 +11,7 @@ use bide::git::{branch_name, commit_message, pr_title, Git, GitCli};
 use bide::policy::Policy;
 use bide::report::{save, RunRecord};
 use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, ProcessShell};
-use bide::{run, Status, Step, StepOutcome, Workflow};
+use bide::{run_from, Status, Step, StepOutcome, Task, Workflow};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
@@ -50,7 +50,8 @@ fn help() -> ExitCode {
            --branch            put the run's changes on a bide/<slug> branch\n  \
            --pr                push the branch and open a pull request\n  \
            --agent <name>      reasoning backend: claude | stub (else [agent] in bide.toml)\n  \
-           --context <name>    context source: lexis"
+           --context <name>    context source: lexis\n  \
+           --resume <id>       continue a previous run from where it stopped"
     );
     ExitCode::SUCCESS
 }
@@ -104,7 +105,23 @@ fn config_state() -> ConfigState {
 }
 
 fn run_task(options: &RunOptions) -> ExitCode {
-    let task = options.task.as_str();
+    let (task_desc, id, mut work, preload) = match &options.resume {
+        Some(id) => match load_state(id) {
+            Ok(state) => (
+                state.task,
+                id.clone(),
+                Task::resumed(state.cursor),
+                Some(state.board),
+            ),
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::from(2);
+            }
+        },
+        None => (options.task.clone(), run_id(), Task::new(), None),
+    };
+    let task = task_desc.as_str();
+
     let workflow = match resolve_workflow() {
         Ok(workflow) => workflow,
         Err(message) => {
@@ -122,6 +139,9 @@ fn run_task(options: &RunOptions) -> ExitCode {
     };
 
     println!("bide run: {task}");
+    if options.resume.is_some() {
+        println!("resuming {id} from step {}", work.cursor());
+    }
     println!("agent: {}", agent.label());
     println!("git: {}\n", git_state());
     let clean_at_start = GitCli.status().clean;
@@ -132,20 +152,33 @@ fn run_task(options: &RunOptions) -> ExitCode {
     let policy = policy_from_config();
     let mut dispatcher =
         build_dispatcher(&workflow, task, &context.text, &agent, &policy, &tools.claude);
+    if let Some(board) = &preload {
+        dispatcher.preload_board(board);
+    }
     dispatcher.set_gate(make_gate(opt_in(options.yes, "BIDE_YES")));
     dispatcher.set_observer(Box::new(PrintObserver));
-    let status = run(&workflow, &mut dispatcher);
+    let status = run_from(&workflow, &mut dispatcher, &mut work);
 
     println!("\nfinished: {status:?}");
     let diff = GitCli.diff();
     let branch = finalize_branch(task, clean_at_start, &diff, opt_in(options.branch, "BIDE_BRANCH"));
+
+    save_state(
+        &id,
+        &RunState {
+            task: task.to_string(),
+            cursor: work.cursor(),
+            board: dispatcher.board_entries().to_vec(),
+        },
+    );
+
     let record = RunRecord {
         task: task.to_string(),
         steps: dispatcher.into_records(),
         status,
         diff,
     };
-    let report_path = record_run(&record);
+    let report_path = record_run(&record, &id);
     maybe_open_pr(
         branch.as_deref(),
         task,
@@ -160,13 +193,41 @@ fn run_task(options: &RunOptions) -> ExitCode {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RunState {
+    task: String,
+    cursor: usize,
+    board: Vec<(String, String)>,
+}
+
+fn state_path(id: &str) -> PathBuf {
+    Path::new(RUNS_DIR).join(id).join("state.json")
+}
+
+fn save_state(id: &str, state: &RunState) {
+    let path = state_path(id);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(state) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+fn load_state(id: &str) -> Result<RunState, String> {
+    let path = state_path(id);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|error| format!("cannot resume {id}: {error}"))?;
+    serde_json::from_str(&text).map_err(|error| format!("invalid state for {id}: {error}"))
+}
+
 fn use_lexis(options: &RunOptions) -> bool {
     let by_flag = options.context.as_deref() == Some("lexis");
     by_flag || matches!(std::env::var("BIDE_CONTEXT").as_deref(), Ok("lexis"))
 }
 
-fn record_run(record: &RunRecord) -> Option<PathBuf> {
-    match save(record, Path::new(RUNS_DIR), &run_id()) {
+fn record_run(record: &RunRecord, id: &str) -> Option<PathBuf> {
+    match save(record, Path::new(RUNS_DIR), id) {
         Ok(path) => {
             println!("report: {}", path.display());
             Some(path)

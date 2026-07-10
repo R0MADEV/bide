@@ -6,6 +6,7 @@ pub struct RunOptions {
     pub pr: bool,
     pub agent: Option<String>,
     pub context: Option<String>,
+    pub resume: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +48,10 @@ fn parse_run(args: &[String]) -> Result<Command, String> {
                 index += 1;
                 options.context = Some(value(args, index, "--context")?);
             }
+            "--resume" => {
+                index += 1;
+                options.resume = Some(value(args, index, "--resume")?);
+            }
             flag if flag.starts_with('-') => return Err(format!("unknown flag: {flag}")),
             _ if task.is_some() => return Err("run takes a single task description".to_string()),
             _ => task = Some(args[index].clone()),
@@ -54,10 +59,10 @@ fn parse_run(args: &[String]) -> Result<Command, String> {
         index += 1;
     }
 
-    let Some(task) = task else {
+    if task.is_none() && options.resume.is_none() {
         return Err("run requires a task description".to_string());
-    };
-    options.task = task;
+    }
+    options.task = task.unwrap_or_default();
     Ok(Command::Run(options))
 }
 

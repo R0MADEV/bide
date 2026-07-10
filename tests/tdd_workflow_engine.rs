@@ -1,4 +1,4 @@
-use bide::{run, Status, Step, StepOutcome, StepRunner, Workflow};
+use bide::{run, run_from, Status, Step, StepOutcome, StepRunner, Task, Workflow};
 use std::collections::HashMap;
 
 /// Records every step it runs and fails a step a configurable number of times
@@ -63,6 +63,21 @@ fn default_recipe_reaches_accepted_when_every_step_succeeds() {
     let mut runner = ScriptedRunner::new();
     let status = run(&Workflow::default_recipe(), &mut runner);
     assert_eq!(status, Status::Accepted);
+}
+
+#[test]
+fn run_from_resumes_at_the_given_cursor_skipping_earlier_steps() {
+    let workflow = pipeline(
+        vec![Step::abort("a"), Step::abort("b"), Step::abort("c")],
+        0,
+    );
+    let mut runner = ScriptedRunner::new();
+    let mut task = Task::resumed(1);
+
+    let status = run_from(&workflow, &mut runner, &mut task);
+
+    assert_eq!(status, Status::Accepted);
+    assert_eq!(runner.visited, vec!["b", "c"]);
 }
 
 #[test]

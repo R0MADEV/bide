@@ -9,12 +9,16 @@ pub trait StepRunner {
 }
 
 pub fn run<R: StepRunner>(workflow: &Workflow, runner: &mut R) -> Status {
-    if workflow.steps.is_empty() {
-        return Status::Accepted;
-    }
+    run_from(workflow, runner, &mut Task::new())
+}
 
-    let mut task = Task::new();
+/// Drives the workflow from the given task's position. `run` starts fresh; a
+/// resumed run passes a task seeded at the step where a previous run stopped.
+pub fn run_from<R: StepRunner>(workflow: &Workflow, runner: &mut R, task: &mut Task) -> Status {
     loop {
+        if task.cursor() >= workflow.steps.len() {
+            return Status::Accepted;
+        }
         let step = &workflow.steps[task.cursor()];
         let outcome = runner.run(step);
         let status = task.advance(workflow, outcome);

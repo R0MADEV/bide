@@ -104,6 +104,18 @@ impl Dispatcher {
         self.records
     }
 
+    pub fn board_entries(&self) -> &[(String, String)] {
+        self.board.entries()
+    }
+
+    /// Seed the blackboard with a previous run's step outputs, so a resumed run's
+    /// remaining steps still see the context the skipped steps produced.
+    pub fn preload_board(&mut self, entries: &[(String, String)]) {
+        for (name, output) in entries {
+            self.board.record(name, output);
+        }
+    }
+
     fn handle(&mut self, step: &Step) -> StepReport {
         match self.handlers.get_mut(&step.name) {
             Some(handler) => handler.handle(step, &self.board),

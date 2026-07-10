@@ -48,6 +48,13 @@ fn a_value_flag_without_a_value_is_an_error() {
 }
 
 #[test]
+fn parses_the_resume_flag_without_a_task() {
+    let options = run(&["run", "--resume", "run-123"]);
+    assert_eq!(options.resume.as_deref(), Some("run-123"));
+    assert!(options.task.is_empty());
+}
+
+#[test]
 fn parses_the_doctor_command() {
     assert_eq!(parse(args(&["doctor"])).unwrap(), Command::Doctor);
 }

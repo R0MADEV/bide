@@ -20,6 +20,10 @@ impl Blackboard {
         self.entries.is_empty()
     }
 
+    pub fn entries(&self) -> &[(String, String)] {
+        &self.entries
+    }
+
     pub fn summary(&self) -> String {
         let mut out = String::new();
         for (name, output) in &self.entries {

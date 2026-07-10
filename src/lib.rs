@@ -13,4 +13,4 @@ pub mod policy;
 pub mod report;
 pub mod tools;
 
-pub use core::{run, OnFailure, Status, Step, StepOutcome, StepRunner, Task, Workflow};
+pub use core::{run, run_from, OnFailure, Status, Step, StepOutcome, StepRunner, Task, Workflow};
