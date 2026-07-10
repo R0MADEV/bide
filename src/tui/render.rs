@@ -100,26 +100,40 @@ fn input_line(app: &App, view: &View) -> Paragraph<'static> {
             "feedback › {}\n[Enter] continue · [⇧↵] newline · [Esc] abort",
             app.feedback
         );
-        return bar(body).block(Block::bordered().title(format!(" checkpoint: {} ", checkpoint.step)));
+        let (_, scroll) = rows_and_scroll(&app.feedback);
+        return bar(body, scroll)
+            .block(Block::bordered().title(format!(" checkpoint: {} ", checkpoint.step)));
     }
     if app.mode == Mode::Running {
         let spin = SPINNER[view.tick % SPINNER.len()];
         let active = active_step(app).unwrap_or("working");
-        return bar(format!(
-            "{spin} {active} · {}s    [↑/↓] scroll",
-            view.elapsed_secs
-        ));
+        return bar(
+            format!("{spin} {active} · {}s    [↑/↓] scroll", view.elapsed_secs),
+            0,
+        );
     }
     let body = format!(
         "› {}\n[Enter] send · [⇧↵] newline · [Esc] quit",
         app.input
     );
-    bar(body).block(Block::bordered().title(" bide "))
+    let (_, scroll) = rows_and_scroll(&app.input);
+    bar(body, scroll).block(Block::bordered().title(" bide "))
 }
 
-/// Height of the bottom box: one line while running, otherwise enough for the
-/// editable text (grown to fit line breaks, capped) plus the hint line and
-/// borders.
+/// The bottom box grows with the text up to this many lines; beyond that it
+/// scrolls, anchored to the last (newest) line.
+const MAX_INPUT_ROWS: u16 = 10;
+
+/// How many rows the editable text occupies (capped) and how far to scroll so
+/// its last line stays visible.
+fn rows_and_scroll(text: &str) -> (u16, u16) {
+    let total = u16::try_from(text.matches('\n').count()).unwrap_or(0) + 1;
+    let visible = total.min(MAX_INPUT_ROWS);
+    (visible, total - visible)
+}
+
+/// Height of the bottom box: one line while running, otherwise the (capped)
+/// editable rows plus the hint line and borders.
 fn input_height(app: &App) -> u16 {
     if app.mode == Mode::Running && app.checkpoint.is_none() {
         return 3;
@@ -129,16 +143,16 @@ fn input_height(app: &App) -> u16 {
     } else {
         &app.input
     };
-    let breaks = u16::try_from(text.matches('\n').count()).unwrap_or(0);
-    let text_rows = (breaks + 1).min(10);
-    // text rows + hint line + top/bottom borders.
-    text_rows + 3
+    let (rows, _) = rows_and_scroll(text);
+    // editable rows + hint line + top/bottom borders.
+    rows + 3
 }
 
-fn bar(text: String) -> Paragraph<'static> {
+fn bar(text: String, scroll: u16) -> Paragraph<'static> {
     Paragraph::new(text)
         .block(Block::bordered())
         .wrap(Wrap { trim: false })
+        .scroll((scroll, 0))
 }
 
 fn active_step(app: &App) -> Option<&str> {

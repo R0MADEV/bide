@@ -97,3 +97,14 @@ fn multiline_input_grows_and_shows_real_lines() {
     assert!(screen.contains("Arregla el login de Microsoft"));
     assert!(screen.contains("y muestra el selector de cuenta"));
 }
+
+#[test]
+fn a_long_input_scrolls_to_the_last_lines() {
+    let mut app = App::new();
+    let many: Vec<String> = (1..=15).map(|n| format!("line {n}")).collect();
+    app.paste(&many.join("\n"));
+    let screen = snapshot(&app, 70, 20);
+    println!("\n{screen}");
+    assert!(screen.contains("line 15"), "newest line must be visible");
+    assert!(!screen.contains("line 1\n") && !screen.contains("│line 1 "), "top lines scrolled off");
+}
