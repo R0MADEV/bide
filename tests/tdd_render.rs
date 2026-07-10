@@ -137,5 +137,5 @@ fn the_empty_workspace_shows_the_cat() {
     let screen = snapshot(&App::new(), 60, 18);
     println!("\n{screen}");
     assert!(screen.contains("▄▀▄"), "cat ears missing");
-    assert!(screen.contains("z"), "sleep bubble missing");
+    assert!(screen.contains("●"), "the cat should have open eyes, awake");
 }
