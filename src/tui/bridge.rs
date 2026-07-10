@@ -1,5 +1,5 @@
 use super::UiEvent;
-use crate::core::{Step, StepOutcome};
+use crate::core::Step;
 use crate::dispatch::{Control, Gate, Observer, StepReport};
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -19,10 +19,12 @@ impl Observer for ChannelObserver {
         let _ = self.events.send(UiEvent::StepStarted(step.name.clone()));
     }
 
-    fn step_finished(&mut self, step: &Step, outcome: StepOutcome) {
-        let _ = self
-            .events
-            .send(UiEvent::StepFinished(step.name.clone(), outcome));
+    fn step_finished(&mut self, step: &Step, report: &StepReport) {
+        let _ = self.events.send(UiEvent::StepFinished {
+            name: step.name.clone(),
+            outcome: report.outcome,
+            output: report.output.clone(),
+        });
     }
 }
 

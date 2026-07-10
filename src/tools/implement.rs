@@ -1,12 +1,21 @@
 use crate::board::Blackboard;
+use crate::context::{stream_claude, streaming_command};
 use crate::core::{Step, StepOutcome};
 use crate::dispatch::{StepHandler, StepReport};
-use crate::exec;
 use std::fmt::Write as _;
-use std::process::Command;
+use std::rc::Rc;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(900);
+
+/// A sink for live progress lines (a tool an agent just used), so a long step
+/// shows what it is doing. Used within a single run's thread, so `Rc` suffices.
+pub type Progress = Rc<dyn Fn(&str)>;
+
+/// A progress sink that discards everything, for non-interactive callers.
+pub fn no_progress() -> Progress {
+    Rc::new(|_line: &str| {})
+}
 
 /// Carries out an implementation by editing the repository. The port isolates
 /// the Claude Code driver so the step logic can be tested without editing files.
@@ -59,32 +68,34 @@ pub fn build_implement_prompt(task: &str, board: &Blackboard) -> String {
 }
 
 /// Real driver: runs Claude Code headlessly under a timeout, accepting its edits,
-/// so it changes files in the repo. Only reached when real agents are opted in.
-#[derive(Debug)]
+/// so it changes files in the repo. Streams each edit/read it makes to the
+/// progress sink. Only reached when real agents are opted in.
 pub struct ClaudeCodeImplementer {
     program: String,
+    progress: Progress,
 }
 
 impl ClaudeCodeImplementer {
-    pub fn new(program: &str) -> Self {
+    pub fn new(program: &str, progress: Progress) -> Self {
         ClaudeCodeImplementer {
             program: program.to_string(),
+            progress,
         }
     }
 }
 
 impl Implementer for ClaudeCodeImplementer {
     fn implement(&mut self, prompt: &str) -> ImplementResult {
-        let mut command = Command::new(&self.program);
-        command
-            .arg("-p")
-            .arg(prompt)
-            .arg("--permission-mode")
-            .arg("acceptEdits");
-        let captured = exec::run(command, TIMEOUT);
+        let command = streaming_command(
+            &self.program,
+            prompt,
+            &["--permission-mode", "acceptEdits"],
+        );
+        let progress = &self.progress;
+        let (success, summary) = stream_claude(command, TIMEOUT, |line| progress(line));
         ImplementResult {
-            success: captured.success,
-            summary: captured.merged().trim().to_string(),
+            success,
+            summary: summary.trim().to_string(),
         }
     }
 }

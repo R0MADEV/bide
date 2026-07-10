@@ -73,7 +73,7 @@ impl Gate for AutoGate {
 /// can forward these as UI events. Methods default to doing nothing.
 pub trait Observer {
     fn step_started(&mut self, _step: &Step) {}
-    fn step_finished(&mut self, _step: &Step, _outcome: StepOutcome) {}
+    fn step_finished(&mut self, _step: &Step, _report: &StepReport) {}
 }
 
 pub struct Silent;
@@ -162,7 +162,7 @@ impl StepRunner for Dispatcher {
             self.observer.step_started(step);
             let report = self.handle(step);
             let outcome = report.outcome;
-            self.observer.step_finished(step, outcome);
+            self.observer.step_finished(step, &report);
             self.record(step, &report);
 
             if !step.pause {

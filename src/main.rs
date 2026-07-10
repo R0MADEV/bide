@@ -7,20 +7,18 @@ use bide::config::{AgentSettings, Provider, ToolSettings};
 use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, ClaudeContext, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, Observer, StepHandler, StepReport};
-use bide::tui::{
-    App, ChannelGate, ChannelObserver, Key as TuiKey, Mode, Reaction, StepStatus, UiEvent,
-};
+use bide::tui::{App, ChannelGate, ChannelObserver, Key as TuiKey, Mode, Reaction, UiEvent};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::layout::{Constraint, Layout};
-use ratatui::widgets::{Block, List, ListItem, Paragraph, Wrap};
-use ratatui::Frame;
+use bide::tui::render::{draw, View};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use bide::git::{branch_name, commit_message, pr_title, Git, GitCli};
 use bide::policy::Policy;
 use bide::report::{clean as clean_runs, save, worth_saving, RunRecord};
-use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, ProcessShell};
-use bide::{run_from, Status, Step, StepOutcome, Task, Workflow};
+use bide::tools::{
+    Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, Progress, ProcessShell,
+};
+use bide::{run_from, Status, Step, Task, Workflow};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
@@ -31,8 +29,6 @@ const CONFIG_PATH: &str = "bide.toml";
 const RUNS_DIR: &str = ".bide/runs";
 const IMPLEMENT_STEP: &str = "implement";
 const KEEP_RUNS: usize = 20;
-/// Braille frames for the "working…" spinner, one per redraw tick.
-const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 fn main() -> ExitCode {
     let command = match parse(std::env::args().skip(1)) {
@@ -77,6 +73,7 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
     // The input awaiting an answer, and when it started (for the elapsed timer).
     let mut pending: Option<(String, Instant)> = None;
     let mut tick: usize = 0;
+    let header = repl_header(options);
 
     if let Some(task) = autostart {
         if !task.trim().is_empty() {
@@ -98,8 +95,16 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
             }
         }
         tick = tick.wrapping_add(1);
-        let elapsed = pending.as_ref().map(|(_, started)| started.elapsed());
-        let _ = terminal.draw(|frame| render(frame, &app, tick, elapsed));
+        let elapsed_secs = pending
+            .as_ref()
+            .map(|(_, started)| started.elapsed().as_secs())
+            .unwrap_or(0);
+        let view = View {
+            header: header.clone(),
+            tick,
+            elapsed_secs,
+        };
+        let _ = terminal.draw(|frame| draw(frame, &app, &view));
 
         if !event::poll(Duration::from_millis(80)).unwrap_or(false) {
             continue;
@@ -173,9 +178,12 @@ fn spawn_route(input: &str, options: &RunOptions, history: &[Turn], app: &mut Ap
             return;
         }
         // Otherwise ask Claude+lexis: it answers a question, or replies TASK.
-        let reply = bide::context::ask_claude(&tools.claude, &bide::route::route_prompt(&history, &input));
-        let is_task = reply.trim().eq_ignore_ascii_case("TASK") || reply.trim().starts_with("TASK");
-        if is_task {
+        // Stream the tools it uses so a long answer shows live progress.
+        let prompt = bide::route::route_prompt(&history, &input);
+        let reply = bide::context::ask_claude_streaming(&tools.claude, &prompt, |line| {
+            let _ = events_tx.send(UiEvent::Chunk(line.to_string()));
+        });
+        if bide::route::is_task_reply(&reply) {
             run_workflow_worker(
                 &input,
                 agent_flag.as_deref(),
@@ -188,6 +196,8 @@ fn spawn_route(input: &str, options: &RunOptions, history: &[Turn], app: &mut Ap
         }
         let answer = if reply.trim().is_empty() {
             "(no answer — is claude available?)".to_string()
+        } else if bide::route::is_hedged_task(&reply) {
+            "That's open-ended — what exactly do you want to do? Give me a concrete goal (a file, a function, a change to make).".to_string()
         } else {
             reply
         };
@@ -228,8 +238,20 @@ fn run_workflow_worker(
         workflow.steps.iter().map(|s| s.name.clone()).collect(),
     ));
 
-    let mut dispatcher =
-        build_dispatcher(&workflow, task, &context.text, &agent, &policy, &tools.claude);
+    // Stream each step's tool use to the UI as a live progress line.
+    let progress_tx = events_tx.clone();
+    let progress: Progress = std::rc::Rc::new(move |line: &str| {
+        let _ = progress_tx.send(UiEvent::Chunk(line.to_string()));
+    });
+    let mut dispatcher = build_dispatcher(
+        &workflow,
+        task,
+        &context.text,
+        &agent,
+        &policy,
+        &tools.claude,
+        &progress,
+    );
     dispatcher.set_observer(Box::new(ChannelObserver::new(events_tx.clone())));
     dispatcher.set_gate(Box::new(ChannelGate::new(events_tx.clone(), decisions_rx)));
     let mut state = Task::new();
@@ -262,66 +284,22 @@ fn map_key(code: KeyCode) -> Option<TuiKey> {
         KeyCode::Backspace => Some(TuiKey::Backspace),
         KeyCode::Up => Some(TuiKey::Up),
         KeyCode::Down => Some(TuiKey::Down),
+        KeyCode::PageUp => Some(TuiKey::PageUp),
+        KeyCode::PageDown => Some(TuiKey::PageDown),
         KeyCode::Char(c) => Some(TuiKey::Char(c)),
         _ => None,
     }
 }
 
-fn render(frame: &mut Frame, app: &App, tick: usize, elapsed: Option<Duration>) {
-    let areas =
-        Layout::vertical([Constraint::Percentage(45), Constraint::Min(0)]).split(frame.area());
-
-    let items: Vec<ListItem> = app
-        .steps
-        .iter()
-        .map(|step| {
-            let mark = match &step.status {
-                StepStatus::Pending => "·",
-                StepStatus::Running => "▶",
-                StepStatus::Done(StepOutcome::Success) => "✓",
-                StepStatus::Done(_) => "✗",
-            };
-            ListItem::new(format!(" {mark} {}", step.name))
-        })
-        .collect();
-    frame.render_widget(List::new(items).block(Block::bordered().title(" bide ")), areas[0]);
-    frame.render_widget(bottom_panel(app, tick, elapsed), areas[1]);
-}
-
-fn bottom_panel(app: &App, tick: usize, elapsed: Option<Duration>) -> Paragraph<'static> {
-    if let Some(checkpoint) = &app.checkpoint {
-        return Paragraph::new(format!(
-            "SENT TO AI:\n{}\n\nRESPONSE:\n{}\n\n> feedback: {}\n\n[↑/↓] scroll   [Enter] continue (or re-plan with feedback)   [Esc] abort",
-            checkpoint.prompt.trim(),
-            checkpoint.output.trim(),
-            app.feedback
-        ))
-        .block(Block::bordered().title(format!(" checkpoint: {} ", checkpoint.step)))
-        .wrap(Wrap { trim: false })
-        .scroll((app.scroll, 0));
-    }
-    if app.mode == Mode::Running {
-        let spin = SPINNER[tick % SPINNER.len()];
-        let secs = elapsed.map(|e| e.as_secs()).unwrap_or(0);
-        return Paragraph::new(format!("{spin} working… {secs}s"))
-            .block(Block::bordered().title(" status "));
-    }
-    // Input mode: show the last answer/result and the prompt line.
-    let mut body = String::new();
-    if let Some(answer) = &app.answer {
-        body.push_str(answer.trim());
-        body.push_str("\n\n");
-    } else if let Some(status) = app.done {
-        body.push_str(&format!("finished: {status:?}\n\n"));
-    }
-    body.push_str(&format!(
-        "> {}\n\n[↑/↓] scroll   [Enter] send — bide decides: question → answered, task → workflow   [Esc] quit",
-        app.input
-    ));
-    Paragraph::new(body)
-        .block(Block::bordered().title(" bide "))
-        .wrap(Wrap { trim: false })
-        .scroll((app.scroll, 0))
+/// The transcript panel's title: bide, the reasoning agent, and the git branch.
+fn repl_header(options: &RunOptions) -> String {
+    let tools = tools_from_config();
+    let agent = resolve_agent(options.agent.as_deref(), &tools.claude)
+        .map(|kind| kind.label())
+        .unwrap_or_else(|_| "stub".to_string());
+    let mut git = GitCli;
+    let branch = git.current_branch().unwrap_or_else(|| "no-git".to_string());
+    format!("bide · {agent} · {branch}")
 }
 
 fn help() -> ExitCode {
@@ -475,8 +453,17 @@ fn run_task(options: &RunOptions) -> ExitCode {
     print_plan(&workflow);
 
     let policy = policy_from_config();
-    let mut dispatcher =
-        build_dispatcher(&workflow, task, &context.text, &agent, &policy, &tools.claude);
+    // On the terminal, print each step's tool use as a live progress line.
+    let progress: Progress = std::rc::Rc::new(|line: &str| println!("  {line}"));
+    let mut dispatcher = build_dispatcher(
+        &workflow,
+        task,
+        &context.text,
+        &agent,
+        &policy,
+        &tools.claude,
+        &progress,
+    );
     if let Some(board) = &preload {
         dispatcher.preload_board(board);
     }
@@ -723,10 +710,11 @@ fn build_dispatcher(
     agent: &AgentKind,
     policy: &Policy,
     claude: &str,
+    progress: &Progress,
 ) -> Dispatcher {
     let mut dispatcher = Dispatcher::new();
     for step in &workflow.steps {
-        let handler = handler_for(step, task, context, agent, policy, claude);
+        let handler = handler_for(step, task, context, agent, policy, claude, progress);
         dispatcher.register(&step.name, handler);
     }
     dispatcher
@@ -739,6 +727,7 @@ fn handler_for(
     agent: &AgentKind,
     policy: &Policy,
     claude: &str,
+    progress: &Progress,
 ) -> Box<dyn StepHandler> {
     if let Some(command) = &step.command {
         return Box::new(CommandStep::new(
@@ -751,11 +740,11 @@ fn handler_for(
     if is_implement_step(step, agent) {
         return Box::new(ImplementStep::new(
             task,
-            Box::new(ClaudeCodeImplementer::new(claude)),
+            Box::new(ClaudeCodeImplementer::new(claude, progress.clone())),
         ));
     }
     let input = format!("{task}\n\nRepository context:\n{context}");
-    Box::new(AgentStep::new(&step.name, &input, agent.build()))
+    Box::new(AgentStep::new(&step.name, &input, agent.build(progress)))
 }
 
 /// The implement step edits the repo through Claude Code — only when real agents
@@ -819,7 +808,7 @@ enum AgentKind {
 }
 
 impl AgentKind {
-    fn build(&self) -> Box<dyn AgentRunner> {
+    fn build(&self, progress: &Progress) -> Box<dyn AgentRunner> {
         match self {
             AgentKind::Stub => Box::new(StubAgent),
             AgentKind::ClaudeCli(program) => Box::new(ClaudeCodeAgent::with_cli(program)),
@@ -828,6 +817,7 @@ impl AgentKind {
                     api_key.clone(),
                     settings.model.clone(),
                     settings.max_tokens,
+                    progress.clone(),
                 )),
                 Provider::Anthropic => Box::new(AnthropicAgent::new(
                     api_key.clone(),
@@ -921,8 +911,8 @@ impl Observer for PrintObserver {
         let _ = io::stdout().flush();
     }
 
-    fn step_finished(&mut self, _step: &Step, outcome: StepOutcome) {
-        println!("{outcome:?}");
+    fn step_finished(&mut self, _step: &Step, report: &StepReport) {
+        println!("{:?}", report.outcome);
     }
 }
 

@@ -20,10 +20,10 @@ impl Observer for Recorder {
         self.log.borrow_mut().push(format!("start:{}", step.name));
     }
 
-    fn step_finished(&mut self, step: &Step, outcome: StepOutcome) {
+    fn step_finished(&mut self, step: &Step, report: &StepReport) {
         self.log
             .borrow_mut()
-            .push(format!("done:{}:{outcome:?}", step.name));
+            .push(format!("done:{}:{:?}", step.name, report.outcome));
     }
 }
 

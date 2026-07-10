@@ -1,7 +1,10 @@
 mod claude;
 mod lexis;
 
-pub use claude::{ask_claude, retrieval_prompt, ClaudeContext};
+pub use claude::{
+    ask_claude, ask_claude_streaming, retrieval_prompt, stream_claude, streaming_command,
+    ClaudeContext,
+};
 pub use lexis::LexisAsk;
 
 /// Provides repository context for a task. The port that isolates the Lexis

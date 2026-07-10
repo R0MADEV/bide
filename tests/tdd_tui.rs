@@ -13,6 +13,7 @@ fn starts_in_input_mode() {
     let app = App::new();
     assert_eq!(app.mode, Mode::Input);
     assert!(app.steps.is_empty());
+    assert!(app.log.is_empty());
 }
 
 #[test]
@@ -22,6 +23,14 @@ fn typing_and_enter_submits_the_text() {
     assert_eq!(app.input, "add jwt");
     assert_eq!(app.on_key(Key::Enter), Reaction::Submit("add jwt".to_string()));
     assert!(app.input.is_empty());
+}
+
+#[test]
+fn submitting_appends_the_prompt_to_the_transcript() {
+    let mut app = App::new();
+    typed(&mut app, "add jwt");
+    app.on_key(Key::Enter);
+    assert_eq!(app.log.last().unwrap(), "› add jwt");
 }
 
 #[test]
@@ -59,8 +68,78 @@ fn events_update_step_status() {
     app.start_run(vec!["plan".to_string()]);
     app.apply(UiEvent::StepStarted("plan".to_string()));
     assert_eq!(app.steps[0].status, StepStatus::Running);
-    app.apply(UiEvent::StepFinished("plan".to_string(), StepOutcome::Success));
+    app.apply(UiEvent::StepFinished {
+        name: "plan".to_string(),
+        outcome: StepOutcome::Success,
+        output: String::new(),
+    });
     assert_eq!(app.steps[0].status, StepStatus::Done(StepOutcome::Success));
+}
+
+#[test]
+fn a_finished_step_appends_its_output_to_the_transcript() {
+    let mut app = App::new();
+    app.start_run(vec!["context".to_string()]);
+    app.apply(UiEvent::StepFinished {
+        name: "context".to_string(),
+        outcome: StepOutcome::Success,
+        output: "found src/auth.rs".to_string(),
+    });
+    let line = app.log.last().unwrap();
+    assert!(line.contains("context"));
+    assert!(line.contains("found src/auth.rs"));
+}
+
+#[test]
+fn a_chunk_streams_a_progress_line_into_the_transcript() {
+    let mut app = App::new();
+    app.start_question();
+    app.apply(UiEvent::Chunk("→ Read src/main.rs".to_string()));
+    assert_eq!(app.log.last().unwrap(), "→ Read src/main.rs");
+}
+
+#[test]
+fn an_answer_is_stored_and_shown_in_the_transcript() {
+    let mut app = App::new();
+    app.start_question();
+    app.apply(UiEvent::Answer("here is the code".to_string()));
+    assert_eq!(app.answer.as_deref(), Some("here is the code"));
+    assert!(app.log.iter().any(|line| line.contains("here is the code")));
+}
+
+#[test]
+fn arrows_scroll_the_transcript_back_and_forward() {
+    let mut app = App::new();
+    assert_eq!(app.scroll, 0);
+    app.on_key(Key::Up); // back through history
+    app.on_key(Key::Up);
+    assert_eq!(app.scroll, 2);
+    app.on_key(Key::Down);
+    assert_eq!(app.scroll, 1);
+    // Cannot go past the newest (bottom).
+    app.on_key(Key::Down);
+    app.on_key(Key::Down);
+    assert_eq!(app.scroll, 0);
+}
+
+#[test]
+fn page_keys_scroll_a_page_at_a_time() {
+    let mut app = App::new();
+    app.on_key(Key::PageUp);
+    assert!(app.scroll >= 10);
+    app.on_key(Key::PageDown);
+    assert_eq!(app.scroll, 0);
+}
+
+#[test]
+fn new_content_jumps_back_to_the_newest() {
+    let mut app = App::new();
+    app.start_question();
+    app.on_key(Key::Up);
+    app.on_key(Key::Up);
+    assert_eq!(app.scroll, 2);
+    app.apply(UiEvent::Answer("a long answer".to_string()));
+    assert_eq!(app.scroll, 0);
 }
 
 #[test]
@@ -100,40 +179,6 @@ fn esc_at_a_checkpoint_aborts() {
         output: String::new(),
     });
     assert_eq!(app.on_key(Key::Esc), Reaction::Decide(Control::Abort));
-}
-
-#[test]
-fn an_answer_event_is_stored() {
-    let mut app = App::new();
-    app.start_question();
-    app.apply(UiEvent::Answer("here is the code".to_string()));
-    assert_eq!(app.answer.as_deref(), Some("here is the code"));
-}
-
-#[test]
-fn arrows_scroll_the_bottom_panel() {
-    let mut app = App::new();
-    assert_eq!(app.scroll, 0);
-    app.on_key(Key::Down);
-    app.on_key(Key::Down);
-    assert_eq!(app.scroll, 2);
-    app.on_key(Key::Up);
-    assert_eq!(app.scroll, 1);
-    // Scrolling up past the top stays at zero.
-    app.on_key(Key::Up);
-    app.on_key(Key::Up);
-    assert_eq!(app.scroll, 0);
-}
-
-#[test]
-fn new_content_resets_scroll() {
-    let mut app = App::new();
-    app.start_question();
-    app.on_key(Key::Down);
-    app.on_key(Key::Down);
-    assert_eq!(app.scroll, 2);
-    app.apply(UiEvent::Answer("a long answer".to_string()));
-    assert_eq!(app.scroll, 0);
 }
 
 #[test]
