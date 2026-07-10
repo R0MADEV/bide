@@ -36,6 +36,11 @@ impl Step {
         self.command = Some(command.to_string());
         self
     }
+
+    pub fn with_pause(mut self) -> Self {
+        self.pause = true;
+        self
+    }
 }
 
 /// An ordered, composable list of steps. This is the recipe bide drives; it can
@@ -54,7 +59,7 @@ impl Workflow {
             max_retries: 3,
             steps: vec![
                 Step::abort("build_context"),
-                Step::abort("plan"),
+                Step::abort("plan").with_pause(), // stop so you can review the plan
                 Step::retry_from("critic", plan), // reject -> re-plan
                 Step::abort("implement"),
                 Step::retry_from("verify", implement), // tests fail -> re-implement
