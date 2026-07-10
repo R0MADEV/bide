@@ -44,6 +44,6 @@ impl StepHandler for AgentStep {
             Verdict::Proceed => StepOutcome::Success,
             Verdict::Reject(_) | Verdict::Failed(_) => StepOutcome::Failure,
         };
-        StepReport::new(outcome, response.output)
+        StepReport::new(outcome, response.output).with_prompt(request.input)
     }
 }

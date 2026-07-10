@@ -8,6 +8,7 @@ pub struct StepRecord {
     pub name: String,
     pub outcome: StepOutcome,
     pub output: String,
+    pub prompt: String,
 }
 
 /// The record of one run: the task, every step it took (retries included) and
@@ -28,8 +29,11 @@ pub fn render(record: &RunRecord) -> String {
 
     for (index, step) in record.steps.iter().enumerate() {
         let _ = writeln!(out, "{}. {} — {:?}", index + 1, step.name, step.outcome);
+        if !step.prompt.trim().is_empty() {
+            let _ = writeln!(out, "\nPrompt sent:\n```\n{}\n```", step.prompt.trim());
+        }
         if !step.output.trim().is_empty() {
-            let _ = writeln!(out, "\n```\n{}\n```\n", step.output.trim());
+            let _ = writeln!(out, "\nOutput:\n```\n{}\n```\n", step.output.trim());
         }
     }
 

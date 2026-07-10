@@ -27,7 +27,11 @@ pub struct StepView {
 pub enum UiEvent {
     StepStarted(String),
     StepFinished(String, StepOutcome),
-    Checkpoint { step: String, output: String },
+    Checkpoint {
+        step: String,
+        prompt: String,
+        output: String,
+    },
     Finished(Status),
 }
 
@@ -43,6 +47,7 @@ pub enum Key {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checkpoint {
     pub step: String,
+    pub prompt: String,
     pub output: String,
 }
 
@@ -74,8 +79,16 @@ impl App {
         match event {
             UiEvent::StepStarted(name) => self.set_status(&name, StepStatus::Running),
             UiEvent::StepFinished(name, outcome) => self.set_status(&name, StepStatus::Done(outcome)),
-            UiEvent::Checkpoint { step, output } => {
-                self.checkpoint = Some(Checkpoint { step, output });
+            UiEvent::Checkpoint {
+                step,
+                prompt,
+                output,
+            } => {
+                self.checkpoint = Some(Checkpoint {
+                    step,
+                    prompt,
+                    output,
+                });
                 self.feedback.clear();
             }
             UiEvent::Finished(status) => self.done = Some(status),

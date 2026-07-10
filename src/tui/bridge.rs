@@ -42,6 +42,7 @@ impl Gate for ChannelGate {
     fn checkpoint(&mut self, step: &Step, report: &StepReport) -> Control {
         let _ = self.events.send(UiEvent::Checkpoint {
             step: step.name.clone(),
+            prompt: report.prompt.clone(),
             output: report.output.clone(),
         });
         // If the UI is gone, abort rather than hang.

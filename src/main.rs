@@ -158,7 +158,8 @@ fn render(frame: &mut Frame, app: &App) {
 
     let panel = match (&app.checkpoint, app.done) {
         (Some(checkpoint), _) => Paragraph::new(format!(
-            "{}\n\n> feedback: {}\n\n[Enter] continue (or re-plan with feedback)   [Esc] abort",
+            "SENT TO AI:\n{}\n\nRESPONSE:\n{}\n\n> feedback: {}\n\n[Enter] continue (or re-plan with feedback)   [Esc] abort",
+            checkpoint.prompt.trim(),
             checkpoint.output.trim(),
             app.feedback
         ))

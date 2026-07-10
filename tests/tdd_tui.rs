@@ -28,10 +28,12 @@ fn a_checkpoint_event_opens_the_panel() {
     let mut app = app();
     app.apply(UiEvent::Checkpoint {
         step: "plan".to_string(),
+        prompt: "please plan this".to_string(),
         output: "the plan body".to_string(),
     });
     let checkpoint = app.checkpoint.as_ref().expect("checkpoint open");
     assert_eq!(checkpoint.output, "the plan body");
+    assert_eq!(checkpoint.prompt, "please plan this");
 }
 
 #[test]
@@ -45,6 +47,7 @@ fn typing_edits_the_feedback_field() {
     let mut app = app();
     app.apply(UiEvent::Checkpoint {
         step: "plan".to_string(),
+        prompt: String::new(),
         output: String::new(),
     });
     app.on_key(Key::Char('h'));
@@ -59,6 +62,7 @@ fn enter_without_feedback_continues() {
     let mut app = app();
     app.apply(UiEvent::Checkpoint {
         step: "plan".to_string(),
+        prompt: String::new(),
         output: String::new(),
     });
     assert_eq!(app.on_key(Key::Enter), Some(Control::Continue));
@@ -70,6 +74,7 @@ fn enter_with_feedback_retries_with_it() {
     let mut app = app();
     app.apply(UiEvent::Checkpoint {
         step: "plan".to_string(),
+        prompt: String::new(),
         output: String::new(),
     });
     app.on_key(Key::Char('x'));
@@ -81,6 +86,7 @@ fn esc_aborts() {
     let mut app = app();
     app.apply(UiEvent::Checkpoint {
         step: "plan".to_string(),
+        prompt: String::new(),
         output: String::new(),
     });
     assert_eq!(app.on_key(Key::Esc), Some(Control::Abort));

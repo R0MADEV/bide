@@ -11,11 +11,13 @@ fn sample() -> RunRecord {
                 name: "plan".to_string(),
                 outcome: StepOutcome::Success,
                 output: "the plan body".to_string(),
+                prompt: "please plan this task".to_string(),
             },
             StepRecord {
                 name: "verify".to_string(),
                 outcome: StepOutcome::Failure,
                 output: "command failed".to_string(),
+                prompt: String::new(),
             },
         ],
     }
@@ -29,6 +31,7 @@ fn report_includes_task_status_steps_and_outputs() {
     assert!(markdown.contains("plan"));
     assert!(markdown.contains("verify"));
     assert!(markdown.contains("the plan body"));
+    assert!(markdown.contains("please plan this task"));
 }
 
 #[test]

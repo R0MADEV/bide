@@ -8,6 +8,9 @@ use std::collections::HashMap;
 pub struct StepReport {
     pub outcome: StepOutcome,
     pub output: String,
+    /// The message sent to the AI, for agent steps (empty otherwise). Surfaced so
+    /// the user can see exactly what bide asked.
+    pub prompt: String,
 }
 
 impl StepReport {
@@ -15,7 +18,13 @@ impl StepReport {
         StepReport {
             outcome,
             output: output.into(),
+            prompt: String::new(),
         }
+    }
+
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.prompt = prompt.into();
+        self
     }
 }
 
@@ -130,6 +139,7 @@ impl Dispatcher {
             name: step.name.clone(),
             outcome: report.outcome,
             output: report.output.clone(),
+            prompt: report.prompt.clone(),
         });
     }
 }
