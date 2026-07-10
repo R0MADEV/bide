@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod context;
 pub mod core;
+pub mod detect;
 pub mod doctor;
 pub mod exec;
 pub mod git;

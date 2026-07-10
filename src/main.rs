@@ -229,9 +229,25 @@ fn run_id() -> String {
 fn resolve_workflow() -> Result<Workflow, String> {
     let path = Path::new(CONFIG_PATH);
     if !path.exists() {
-        return Ok(Workflow::default_recipe());
+        return Ok(default_workflow());
     }
     bide::config::load(path).map_err(|error| format!("invalid {CONFIG_PATH}: {error}"))
+}
+
+/// The default recipe, with its verify step wired to the detected project test
+/// command (cargo test, npm test, ...) so `bide run` does something real even
+/// without a bide.toml.
+fn default_workflow() -> Workflow {
+    let mut workflow = Workflow::default_recipe();
+    let Some(command) = bide::detect::verify_command(Path::new(".")) else {
+        return workflow;
+    };
+    for step in &mut workflow.steps {
+        if step.name == "verify" {
+            step.command = Some(command.clone());
+        }
+    }
+    workflow
 }
 
 fn print_plan(workflow: &Workflow) {
