@@ -98,37 +98,80 @@ fn transcript(app: &App, view: &View, area: Rect) -> Paragraph<'static> {
         .scroll((top, 0))
 }
 
-/// The transcript as styled lines: your prompts stand out, tool-use dims, step
-/// results are coloured by outcome, a checkpoint header is highlighted.
+/// The transcript as styled lines: our own markers (your prompt, tool use, step
+/// result) get one flat colour; runs of plain content are rendered as markdown
+/// by tui-markdown, and a checkpoint's plan is rendered the same way.
 fn transcript_lines(app: &App) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line> = app.log.iter().map(|line| log_line(line)).collect();
+    let mut lines: Vec<Line> = Vec::new();
+    let mut block: Vec<&str> = Vec::new();
+    for entry in &app.log {
+        match marker_style(entry) {
+            Some(style) => {
+                flush_markdown(&mut block, &mut lines);
+                lines.push(Line::styled(entry.to_string(), style));
+            }
+            None => block.push(entry),
+        }
+    }
+    flush_markdown(&mut block, &mut lines);
+
     if let Some(checkpoint) = &app.checkpoint {
         lines.push(Line::raw(""));
         lines.push(Line::styled(
             format!("── checkpoint: {} — review below ──", checkpoint.step),
             Style::default().fg(RUNNING).add_modifier(Modifier::BOLD),
         ));
-        for line in checkpoint.output.trim().lines() {
-            lines.push(Line::raw(line.to_string()));
-        }
+        lines.extend(markdown_lines(checkpoint.output.trim()));
     }
     lines
 }
 
-fn log_line(line: &str) -> Line<'static> {
-    let owned = line.to_string();
-    let style = if line.starts_with("› ") {
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-    } else if line.starts_with("→ ") {
-        Style::default().fg(MUTED)
-    } else if line.starts_with("✓ ") {
-        Style::default().fg(OK)
-    } else if line.starts_with("✗ ") {
-        Style::default().fg(BAD)
-    } else {
-        Style::default()
-    };
-    Line::styled(owned, style)
+/// Render the accumulated content block through tui-markdown and reset it.
+fn flush_markdown(block: &mut Vec<&str>, out: &mut Vec<Line<'static>>) {
+    if block.is_empty() {
+        return;
+    }
+    out.extend(markdown_lines(&block.join("\n")));
+    block.clear();
+}
+
+/// Markdown → owned styled lines. tui-markdown borrows from the input, so its
+/// lines are copied to `'static` for the widget.
+fn markdown_lines(markdown: &str) -> Vec<Line<'static>> {
+    tui_markdown::from_str(markdown)
+        .lines
+        .into_iter()
+        .map(own_line)
+        .collect()
+}
+
+fn own_line(line: Line) -> Line<'static> {
+    let spans: Vec<Span<'static>> = line
+        .spans
+        .into_iter()
+        .map(|span| Span::styled(span.content.into_owned(), span.style))
+        .collect();
+    let mut owned = Line::from(spans);
+    owned.style = line.style;
+    owned.alignment = line.alignment;
+    owned
+}
+
+/// Our own transcript markers get one flat colour; other lines are content.
+fn marker_style(line: &str) -> Option<Style> {
+    if line.starts_with("› ") {
+        return Some(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD));
+    }
+    if line.starts_with("→ ") {
+        return Some(Style::default().fg(MUTED));
+    }
+    if line.starts_with("✓ ") {
+        return Some(Style::default().fg(OK));
+    }
+    if line.starts_with("✗ ") {
+        return Some(Style::default().fg(BAD));
+    }
+    None
 }
 
 fn transcript_body(app: &App) -> String {
@@ -285,4 +328,22 @@ fn wrapped_lines(text: &str, width: u16) -> usize {
             chars.div_ceil(width)
         })
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markdown_renders_to_owned_lines_preserving_text() {
+        let lines = markdown_lines("# Title\n\nsome **bold** text and `code`");
+        let text: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(text.contains("Title"));
+        assert!(text.contains("bold"));
+        assert!(text.contains("code"));
+    }
 }

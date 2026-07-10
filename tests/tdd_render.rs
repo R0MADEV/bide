@@ -108,3 +108,13 @@ fn a_long_input_scrolls_to_the_last_lines() {
     assert!(screen.contains("line 15"), "newest line must be visible");
     assert!(!screen.contains("line 1\n") && !screen.contains("│line 1 "), "top lines scrolled off");
 }
+
+#[test]
+fn markdown_answer_renders_headings_and_lists() {
+    let mut app = App::new();
+    app.start_question();
+    app.apply(UiEvent::Answer("# Plan\n\n1. Add the `--json` flag\n2. Wire it in **main**\n\n- note one\n- note two".to_string()));
+    let screen = snapshot(&app, 60, 14);
+    println!("\n{screen}");
+    assert!(screen.contains("Plan"));
+}
