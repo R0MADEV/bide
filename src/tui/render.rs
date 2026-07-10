@@ -67,14 +67,20 @@ pub fn draw(frame: &mut Frame, app: &App, view: &View) {
     };
 
     if is_fresh(app) {
+        // Empty workspace: the big sleeping cat, no corner cat.
         frame.render_widget(cat_panel(view, main_area), main_area);
-    } else {
-        frame.render_widget(transcript(app, view, main_area), main_area);
+        frame.render_widget(input_line(app, view), rows[1]);
+        return;
     }
+    frame.render_widget(transcript(app, view, main_area), main_area);
     if let Some(area) = sidebar_area {
         frame.render_widget(sidebar(app, view), area);
     }
-    frame.render_widget(input_line(app, view), rows[1]);
+    // A little awake cat sits in the bottom-right, beside the input.
+    let bottom = Layout::horizontal([Constraint::Min(0), Constraint::Length(MINI_CAT_WIDTH)])
+        .split(rows[1]);
+    frame.render_widget(input_line(app, view), bottom[0]);
+    frame.render_widget(mini_cat(view, bottom[1]), bottom[1]);
 }
 
 /// The empty workspace: nothing typed or run yet.
@@ -124,17 +130,23 @@ fn plain_title(text: &str) -> Line<'static> {
     Line::styled(format!(" {text} "), Style::default().fg(MUTED))
 }
 
-/// The input panel, with a small awake cat in the bottom-right corner once the
-/// workspace has a chat (the big sleeping mascot is gone by then). It blinks now
-/// and then so it looks alive.
-fn input_panel(title: &str, tick: usize, with_cat: bool) -> Block<'static> {
-    let block = panel(plain_title(title));
-    if !with_cat {
-        return block;
+/// A compact block-art cat (the mascot's little sibling), awake and blinking,
+/// shown in the bottom-right once the workspace has a chat.
+const MINI_CAT_WIDTH: u16 = 9;
+
+fn mini_cat(view: &View, area: Rect) -> Paragraph<'static> {
+    let eye = if view.tick % 40 < 3 { '‿' } else { '●' };
+    let rows = [
+        " ▄▀▄ ▄▀▄ ".to_string(),
+        format!(" █ {eye} {eye} █ "),
+        "  ▀▄▄▄▀  ".to_string(),
+    ];
+    let top = usize::from(area.height.saturating_sub(3));
+    let mut lines: Vec<Line> = vec![Line::raw(""); top];
+    for row in rows {
+        lines.push(Line::styled(row, Style::default().fg(ACCENT)));
     }
-    let blinking = tick % 40 < 3;
-    let cat = if blinking { " ᓚ‿ᗢ " } else { " ᓚᘏᗢ " };
-    block.title_bottom(Line::from(Span::styled(cat, Style::default().fg(ACCENT))).right_aligned())
+    Paragraph::new(Text::from(lines))
 }
 
 /// The header " bide · agent · branch ": the name in the accent colour, the rest
@@ -339,11 +351,11 @@ fn input_line(app: &App, view: &View) -> Paragraph<'static> {
             Span::raw(format!(" {active} · {}s", view.elapsed_secs)),
             Span::styled("    [↑/↓] scroll", Style::default().fg(MUTED)),
         ]);
-        return box_of(vec![line], 0).block(input_panel("bide", view.tick, true));
+        return box_of(vec![line], 0).block(panel(plain_title("bide")));
     }
     let lines = editable_lines("› ", &app.input, "[Enter] send · [⇧↵] newline · [Esc] quit");
     let (_, scroll) = rows_and_scroll(&app.input);
-    box_of(lines, scroll).block(input_panel("bide", view.tick, !is_fresh(app)))
+    box_of(lines, scroll).block(panel(plain_title("bide")))
 }
 
 /// The editable text as styled lines: an accented prompt on the first line, the
