@@ -14,6 +14,7 @@ pub enum Command {
     Run(RunOptions),
     Tui(RunOptions),
     Repl,
+    Init,
     Doctor,
     Help,
 }
@@ -25,6 +26,7 @@ pub fn parse(args: impl Iterator<Item = String>) -> Result<Command, String> {
     };
     match command.as_str() {
         "help" | "--help" | "-h" => Ok(Command::Help),
+        "init" => Ok(Command::Init),
         "doctor" => Ok(Command::Doctor),
         "run" => parse_run(&args[1..]).map(Command::Run),
         "tui" => parse_run(&args[1..]).map(Command::Tui),

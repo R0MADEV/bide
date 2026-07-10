@@ -1,0 +1,84 @@
+use std::fs::OpenOptions;
+use std::io::{self, Write};
+use std::path::Path;
+
+/// A starter bide.toml with a sample workflow, written by `bide init`. It is a
+/// valid config (see the parse test) so a fresh project runs out of the box.
+pub const STARTER_CONFIG: &str = r#"# bide configuration.
+# The workflow is a composable list of steps the engine walks in order.
+
+# Optional. The agent backend that reasons for steps without a command.
+# The API key is NEVER stored here: api_key_env names the environment
+# variable that holds it. Omit this section to use the stub agent.
+# provider: openai | anthropic
+# [agent]
+# provider = "openai"
+# model = "gpt-4o"
+# api_key_env = "OPENAI_API_KEY"
+# max_tokens = 4096   # cap on the model's reply length (default 4096)
+
+# Optional. Extra security rules added ON TOP of the built-in ones (rm -rf,
+# .env, ssh keys, ...). A command containing any deny_commands string is
+# blocked; a path containing any secret_paths string is off limits.
+# [policy]
+# deny_commands = ["terraform destroy", "kubectl delete"]
+# secret_paths = ["config/master.key"]
+
+# Optional. Override the external tool binaries (default: the plain name on PATH).
+# [tools]
+# claude = "/usr/local/bin/claude"
+# lexis = "lexis"
+# gh = "gh"
+
+[workflow]
+# Retries allowed for a retry_from step before the run is marked Failed.
+max_retries = 3
+
+[[workflow.step]]
+name = "plan"
+on_failure = "abort"
+# A checkpoint: bide stops here after the step so you can review it and
+# choose to continue, retry or abort. Run with BIDE_YES=1 to skip all stops.
+pause = true
+
+[[workflow.step]]
+name = "critic"
+# If the critic rejects the plan, jump back and re-plan.
+on_failure = { retry_from = "plan" }
+
+[[workflow.step]]
+name = "implement"
+on_failure = "abort"
+
+[[workflow.step]]
+name = "verify"
+# Steps with a command run it behind the policy gate.
+command = "cargo test"
+# On failure, jump back to "implement" and try again (bounded by max_retries).
+on_failure = { retry_from = "implement" }
+
+[[workflow.step]]
+name = "diff"
+# Its output (the changes) reaches the review step through the blackboard.
+command = "git diff"
+on_failure = "abort"
+
+[[workflow.step]]
+name = "review"
+# If the reviewer rejects the changes, jump back and re-implement.
+on_failure = { retry_from = "implement" }
+"#;
+
+/// Write the starter config to `path`, refusing to overwrite an existing file.
+/// Returns `Ok(true)` when it created the file, `Ok(false)` when one already
+/// existed. Uses create-new so a concurrent init cannot clobber an existing
+/// config through a check-then-write race.
+pub fn scaffold(path: &Path) -> io::Result<bool> {
+    let mut file = match OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    file.write_all(STARTER_CONFIG.as_bytes())?;
+    Ok(true)
+}
