@@ -2,7 +2,7 @@ use bide::agents::{
     AgentRequest, AgentResponse, AgentRunner, AgentStep, AnthropicAgent, ClaudeCodeAgent,
     OpenAiAgent, Verdict,
 };
-use bide::cli::{parse, Command};
+use bide::cli::{parse, Command, RunOptions};
 use bide::config::{AgentSettings, Provider};
 use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
@@ -32,9 +32,31 @@ fn main() -> ExitCode {
     };
 
     match command {
-        Command::Run { task, yes } => run_task(&task, yes),
+        Command::Run(options) => run_task(&options),
         Command::Doctor => doctor(),
+        Command::Help => help(),
     }
+}
+
+fn help() -> ExitCode {
+    println!(
+        "bide — a deterministic workflow engine.\n\n\
+         Usage:\n  \
+           bide run \"<task>\" [flags]\n  \
+           bide doctor\n  \
+           bide help\n\n\
+         Run flags (each also has a BIDE_* env var):\n  \
+           --yes, -y           run straight through, no interactive checkpoints\n  \
+           --branch            put the run's changes on a bide/<slug> branch\n  \
+           --pr                push the branch and open a pull request\n  \
+           --agent <name>      reasoning backend: claude | stub (else [agent] in bide.toml)\n  \
+           --context <name>    context source: lexis"
+    );
+    ExitCode::SUCCESS
+}
+
+fn opt_in(flag: bool, env: &str) -> bool {
+    flag || matches!(std::env::var(env).as_deref(), Ok("1"))
 }
 
 fn doctor() -> ExitCode {
@@ -80,7 +102,8 @@ fn config_state() -> ConfigState {
     }
 }
 
-fn run_task(task: &str, yes: bool) -> ExitCode {
+fn run_task(options: &RunOptions) -> ExitCode {
+    let task = options.task.as_str();
     let workflow = match resolve_workflow() {
         Ok(workflow) => workflow,
         Err(message) => {
@@ -88,7 +111,7 @@ fn run_task(task: &str, yes: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let agent = match resolve_agent() {
+    let agent = match resolve_agent(options.agent.as_deref()) {
         Ok(agent) => agent,
         Err(message) => {
             eprintln!("error: {message}");
@@ -100,18 +123,18 @@ fn run_task(task: &str, yes: bool) -> ExitCode {
     println!("agent: {}", agent.label());
     println!("git: {}\n", git_state());
     let clean_at_start = GitCli.status().clean;
-    let context = context_pack(task);
+    let context = context_pack(task, use_lexis(options));
     println!("context:\n{}\n", context.text);
     print_plan(&workflow);
 
     let policy = policy_from_config();
     let mut dispatcher = build_dispatcher(&workflow, task, &context.text, &agent, &policy);
-    dispatcher.set_gate(make_gate(yes));
+    dispatcher.set_gate(make_gate(opt_in(options.yes, "BIDE_YES")));
     let status = run(&workflow, &mut dispatcher);
 
     println!("\nfinished: {status:?}");
     let diff = GitCli.diff();
-    let branch = finalize_branch(task, clean_at_start, &diff);
+    let branch = finalize_branch(task, clean_at_start, &diff, opt_in(options.branch, "BIDE_BRANCH"));
     let record = RunRecord {
         task: task.to_string(),
         steps: dispatcher.into_records(),
@@ -119,12 +142,22 @@ fn run_task(task: &str, yes: bool) -> ExitCode {
         diff,
     };
     let report_path = record_run(&record);
-    maybe_open_pr(branch.as_deref(), task, report_path.as_deref());
+    maybe_open_pr(
+        branch.as_deref(),
+        task,
+        report_path.as_deref(),
+        opt_in(options.pr, "BIDE_PR"),
+    );
 
     match status {
         Status::Accepted => ExitCode::SUCCESS,
         _ => ExitCode::FAILURE,
     }
+}
+
+fn use_lexis(options: &RunOptions) -> bool {
+    let by_flag = options.context.as_deref() == Some("lexis");
+    by_flag || matches!(std::env::var("BIDE_CONTEXT").as_deref(), Ok("lexis"))
 }
 
 fn record_run(record: &RunRecord) -> Option<PathBuf> {
@@ -143,8 +176,12 @@ fn record_run(record: &RunRecord) -> Option<PathBuf> {
 /// After a run, move the changes it produced onto a task branch when opted in
 /// (BIDE_BRANCH=1). Only when the tree was clean at the start (so the changes
 /// are the run's) and the run actually produced a diff — no empty branches.
-fn finalize_branch(task: &str, clean_at_start: bool, diff: &str) -> Option<String> {
-    let opted_in = matches!(std::env::var("BIDE_BRANCH").as_deref(), Ok("1"));
+fn finalize_branch(
+    task: &str,
+    clean_at_start: bool,
+    diff: &str,
+    opted_in: bool,
+) -> Option<String> {
     if !opted_in {
         return None;
     }
@@ -172,8 +209,8 @@ fn finalize_branch(task: &str, clean_at_start: bool, diff: &str) -> Option<Strin
 
 /// Push the task branch and open a PR when opted in (BIDE_PR=1). Uses the run
 /// report as the PR body.
-fn maybe_open_pr(branch: Option<&str>, task: &str, report: Option<&Path>) {
-    if !matches!(std::env::var("BIDE_PR").as_deref(), Ok("1")) {
+fn maybe_open_pr(branch: Option<&str>, task: &str, report: Option<&Path>, opted_in: bool) {
+    if !opted_in {
         return;
     }
     let Some(branch) = branch else {
@@ -315,15 +352,14 @@ fn policy_from_config() -> Policy {
     }
 }
 
-fn context_pack(task: &str) -> ContextPack {
-    let mut provider = context_provider();
+fn context_pack(task: &str, use_lexis: bool) -> ContextPack {
+    let mut provider = context_provider(use_lexis);
     build_context(provider.as_mut(), task)
 }
 
 /// Use Lexis for context when opted in, otherwise none. Keeps `bide run` working
 /// without Lexis installed.
-fn context_provider() -> Box<dyn CodeContext> {
-    let use_lexis = matches!(std::env::var("BIDE_CONTEXT").as_deref(), Ok("lexis"));
+fn context_provider(use_lexis: bool) -> Box<dyn CodeContext> {
     if use_lexis {
         let cwd = std::env::current_dir().unwrap_or_default();
         return Box::new(LexisAsk::new(cwd));
@@ -377,11 +413,15 @@ impl AgentKind {
 
 /// Resolve the agent: an explicit env override wins, then the [agent] section of
 /// bide.toml, otherwise the stub. The API key is read from the named env var.
-fn resolve_agent() -> Result<AgentKind, String> {
-    match std::env::var("BIDE_AGENT").as_deref() {
-        Ok("claude") => return Ok(AgentKind::ClaudeCli),
-        Ok("stub") => return Ok(AgentKind::Stub),
-        _ => {}
+fn resolve_agent(flag: Option<&str>) -> Result<AgentKind, String> {
+    let choice = flag
+        .map(str::to_string)
+        .or_else(|| std::env::var("BIDE_AGENT").ok());
+    match choice.as_deref() {
+        Some("claude") => return Ok(AgentKind::ClaudeCli),
+        Some("stub") => return Ok(AgentKind::Stub),
+        Some(other) => return Err(format!("unknown agent: {other} (use claude or stub)")),
+        None => {}
     }
 
     let path = Path::new(CONFIG_PATH);
@@ -419,8 +459,7 @@ impl AgentRunner for StubAgent {
 }
 
 /// Interactive by default; `--yes` or BIDE_YES=1 runs straight through.
-fn make_gate(yes: bool) -> Box<dyn Gate> {
-    let auto = yes || matches!(std::env::var("BIDE_YES").as_deref(), Ok("1"));
+fn make_gate(auto: bool) -> Box<dyn Gate> {
     if auto {
         return Box::new(AutoGate);
     }

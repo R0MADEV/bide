@@ -1,40 +1,68 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Command {
-    Run { task: String, yes: bool },
-    Doctor,
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RunOptions {
+    pub task: String,
+    pub yes: bool,
+    pub branch: bool,
+    pub pr: bool,
+    pub agent: Option<String>,
+    pub context: Option<String>,
 }
 
-pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
-    let Some(command) = args.next() else {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    Run(RunOptions),
+    Doctor,
+    Help,
+}
+
+pub fn parse(args: impl Iterator<Item = String>) -> Result<Command, String> {
+    let args: Vec<String> = args.collect();
+    let Some(command) = args.first() else {
         return Err("no command given".to_string());
     };
     match command.as_str() {
+        "help" | "--help" | "-h" => Ok(Command::Help),
         "doctor" => Ok(Command::Doctor),
-        "run" => parse_run(args),
+        "run" => parse_run(&args[1..]),
         other => Err(format!("unknown command: {other}")),
     }
 }
 
-fn parse_run(args: impl Iterator<Item = String>) -> Result<Command, String> {
+fn parse_run(args: &[String]) -> Result<Command, String> {
+    let mut options = RunOptions::default();
     let mut task: Option<String> = None;
-    let mut yes = false;
+    let mut index = 0;
 
-    for arg in args {
-        if arg == "--yes" || arg == "-y" {
-            yes = true;
-            continue;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--help" | "-h" => return Ok(Command::Help),
+            "--yes" | "-y" => options.yes = true,
+            "--branch" => options.branch = true,
+            "--pr" => options.pr = true,
+            "--agent" => {
+                index += 1;
+                options.agent = Some(value(args, index, "--agent")?);
+            }
+            "--context" => {
+                index += 1;
+                options.context = Some(value(args, index, "--context")?);
+            }
+            flag if flag.starts_with('-') => return Err(format!("unknown flag: {flag}")),
+            _ if task.is_some() => return Err("run takes a single task description".to_string()),
+            _ => task = Some(args[index].clone()),
         }
-        if arg.starts_with('-') {
-            return Err(format!("unknown flag: {arg}"));
-        }
-        if task.is_some() {
-            return Err("run takes a single task description".to_string());
-        }
-        task = Some(arg);
+        index += 1;
     }
 
     let Some(task) = task else {
         return Err("run requires a task description".to_string());
     };
-    Ok(Command::Run { task, yes })
+    options.task = task;
+    Ok(Command::Run(options))
+}
+
+fn value(args: &[String], index: usize, flag: &str) -> Result<String, String> {
+    args.get(index)
+        .cloned()
+        .ok_or_else(|| format!("{flag} needs a value"))
 }
