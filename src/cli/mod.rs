@@ -13,6 +13,7 @@ pub struct RunOptions {
 pub enum Command {
     Run(RunOptions),
     Tui(RunOptions),
+    Repl,
     Doctor,
     Help,
 }
@@ -20,7 +21,7 @@ pub enum Command {
 pub fn parse(args: impl Iterator<Item = String>) -> Result<Command, String> {
     let args: Vec<String> = args.collect();
     let Some(command) = args.first() else {
-        return Err("no command given".to_string());
+        return Ok(Command::Repl);
     };
     match command.as_str() {
         "help" | "--help" | "-h" => Ok(Command::Help),

@@ -79,8 +79,8 @@ fn run_requires_a_task_description() {
 }
 
 #[test]
-fn empty_input_is_an_error() {
-    assert!(parse(args(&[])).is_err());
+fn no_args_launches_the_repl() {
+    assert_eq!(parse(args(&[])).unwrap(), Command::Repl);
 }
 
 #[test]

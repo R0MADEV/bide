@@ -7,7 +7,9 @@ use bide::config::{AgentSettings, Provider, ToolSettings};
 use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, ClaudeContext, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, Observer, StepHandler, StepReport};
-use bide::tui::{App, ChannelGate, ChannelObserver, Key as TuiKey, StepStatus, UiEvent};
+use bide::tui::{
+    App, ChannelGate, ChannelObserver, Key as TuiKey, Mode, Reaction, StepStatus, UiEvent,
+};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::widgets::{Block, List, ListItem, Paragraph, Wrap};
@@ -40,52 +42,110 @@ fn main() -> ExitCode {
 
     match command {
         Command::Run(options) => run_task(&options),
-        Command::Tui(options) => tui_command(&options),
+        Command::Tui(options) => {
+            let start = options.task.clone();
+            repl(&options, Some(start))
+        }
+        Command::Repl => repl(&RunOptions::default(), None),
         Command::Doctor => doctor(),
         Command::Help => help(),
     }
 }
 
-/// Runs the workflow in a worker thread and drives a terminal UI: the steps with
-/// live status, and a checkpoint panel where you continue, re-plan with feedback
-/// or abort. The engine talks to the UI only through the Observer/Gate ports.
-fn tui_command(options: &RunOptions) -> ExitCode {
+/// A run in flight: the events it emits and the channel to send it decisions.
+struct ActiveRun {
+    events: Receiver<UiEvent>,
+    decisions: Sender<Control>,
+    handle: thread::JoinHandle<()>,
+}
+
+/// The interactive workspace: type a task to run the workflow, or `?question` to
+/// ask Claude+lexis about the code. Runs happen in a worker thread; the UI only
+/// observes and decides through the ports.
+fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
+    let mut terminal = ratatui::init();
+    let mut app = App::new();
+    let mut active: Option<ActiveRun> = None;
+
+    if let Some(task) = autostart {
+        if !task.trim().is_empty() {
+            active = spawn_workflow(&task, options, &mut app);
+        }
+    }
+
+    loop {
+        if let Some(run) = &active {
+            while let Ok(event) = run.events.try_recv() {
+                app.apply(event);
+            }
+            if app.mode == Mode::Input {
+                if let Some(run) = active.take() {
+                    let _ = run.handle.join();
+                }
+            }
+        }
+        let _ = terminal.draw(|frame| render(frame, &app));
+
+        if !event::poll(Duration::from_millis(80)).unwrap_or(false) {
+            continue;
+        }
+        let Ok(Event::Key(key)) = event::read() else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        let Some(mapped) = map_key(key.code) else {
+            continue;
+        };
+        match app.on_key(mapped) {
+            Reaction::Quit => break,
+            Reaction::RunTask(task) => active = spawn_workflow(&task, options, &mut app),
+            Reaction::AskQuestion(question) => active = Some(spawn_question(&question, options, &mut app)),
+            Reaction::Decide(control) => {
+                if let Some(run) = &active {
+                    let _ = run.decisions.send(control);
+                }
+            }
+            Reaction::None => {}
+        }
+    }
+
+    ratatui::restore();
+    ExitCode::SUCCESS
+}
+
+/// Resolve everything and spawn the workflow worker. Returns None (and shows the
+/// error) if the agent/config could not be resolved.
+fn spawn_workflow(task: &str, options: &RunOptions, app: &mut App) -> Option<ActiveRun> {
     let workflow = match resolve_workflow() {
         Ok(workflow) => workflow,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::from(2);
-        }
+        Err(message) => return fail_run(app, &message),
     };
     let tools = tools_from_config();
     let agent = match resolve_agent(options.agent.as_deref(), &tools.claude) {
         Ok(agent) => agent,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::from(2);
-        }
+        Err(message) => return fail_run(app, &message),
     };
     let policy = policy_from_config();
-    let context = context_pack(&options.task, context_choice(options).as_deref(), &tools);
-    let step_names: Vec<String> = workflow.steps.iter().map(|s| s.name.clone()).collect();
+    let context = context_pack(task, context_choice(options).as_deref(), &tools);
 
-    let (events_tx, events_rx) = mpsc::channel::<UiEvent>();
-    let (decisions_tx, decisions_rx) = mpsc::channel::<Control>();
+    app.start_run(workflow.steps.iter().map(|s| s.name.clone()).collect());
 
-    let task = options.task.clone();
+    let (events_tx, events) = mpsc::channel::<UiEvent>();
+    let (decisions, decisions_rx) = mpsc::channel::<Control>();
+    let task = task.to_string();
     let claude = tools.claude.clone();
     let context_text = context.text;
     let id = run_id();
-    let worker = thread::spawn(move || {
+    let handle = thread::spawn(move || {
         let mut dispatcher =
             build_dispatcher(&workflow, &task, &context_text, &agent, &policy, &claude);
         dispatcher.set_observer(Box::new(ChannelObserver::new(events_tx.clone())));
         dispatcher.set_gate(Box::new(ChannelGate::new(events_tx.clone(), decisions_rx)));
         let mut state = Task::new();
         let status = run_from(&workflow, &mut dispatcher, &mut state);
-        let _ = events_tx.send(UiEvent::Finished(status));
 
-        // Persist the run just like the CLI does: state, then report + context.
         let diff = GitCli.diff();
         save_state(
             &id,
@@ -103,48 +163,44 @@ fn tui_command(options: &RunOptions) -> ExitCode {
             context: context_text,
         };
         let _ = record_run(&record, &id);
+        let _ = events_tx.send(UiEvent::Finished(status));
     });
 
-    let exit = run_ui(step_names, &events_rx, &decisions_tx);
-    let _ = worker.join();
-    exit
+    Some(ActiveRun {
+        events,
+        decisions,
+        handle,
+    })
 }
 
-fn run_ui(step_names: Vec<String>, events: &Receiver<UiEvent>, decisions: &Sender<Control>) -> ExitCode {
-    let mut terminal = ratatui::init();
-    let mut app = App::new(step_names);
+/// Answer a question with Claude Code + lexis, no workflow.
+fn spawn_question(question: &str, options: &RunOptions, app: &mut App) -> ActiveRun {
+    app.start_question();
+    let tools = tools_from_config();
+    let choice = context_choice(options).unwrap_or_else(|| "claude".to_string());
 
-    let final_status = loop {
-        while let Ok(event) = events.try_recv() {
-            app.apply(event);
-        }
-        let _ = terminal.draw(|frame| render(frame, &app));
+    let (events_tx, events) = mpsc::channel::<UiEvent>();
+    let (decisions, _decisions_rx) = mpsc::channel::<Control>();
+    let question = question.to_string();
+    let handle = thread::spawn(move || {
+        let mut provider = context_provider(Some(choice.as_str()), &tools);
+        let answer = build_context(provider.as_mut(), &question).text;
+        let _ = events_tx.send(UiEvent::Answer(answer));
+        let _ = events_tx.send(UiEvent::Finished(Status::Accepted));
+    });
 
-        if !event::poll(Duration::from_millis(100)).unwrap_or(false) {
-            continue;
-        }
-        let Ok(Event::Key(key)) = event::read() else {
-            continue;
-        };
-        if key.kind != KeyEventKind::Press {
-            continue;
-        }
-        if let Some(mapped) = map_key(key.code) {
-            if let Some(control) = app.on_key(mapped) {
-                let _ = decisions.send(control);
-            }
-        }
-        let quit = matches!(key.code, KeyCode::Char('q') | KeyCode::Enter | KeyCode::Esc);
-        if app.done.is_some() && quit {
-            break app.done;
-        }
-    };
-
-    ratatui::restore();
-    match final_status {
-        Some(Status::Accepted) => ExitCode::SUCCESS,
-        _ => ExitCode::FAILURE,
+    ActiveRun {
+        events,
+        decisions,
+        handle,
     }
+}
+
+fn fail_run(app: &mut App, message: &str) -> Option<ActiveRun> {
+    app.start_question();
+    app.apply(UiEvent::Answer(format!("error: {message}")));
+    app.apply(UiEvent::Finished(Status::Failed));
+    None
 }
 
 fn map_key(code: KeyCode) -> Option<TuiKey> {
@@ -175,31 +231,47 @@ fn render(frame: &mut Frame, app: &App) {
         })
         .collect();
     frame.render_widget(List::new(items).block(Block::bordered().title(" bide ")), areas[0]);
+    frame.render_widget(bottom_panel(app), areas[1]);
+}
 
-    let panel = match (&app.checkpoint, app.done) {
-        (Some(checkpoint), _) => Paragraph::new(format!(
+fn bottom_panel(app: &App) -> Paragraph<'static> {
+    if let Some(checkpoint) = &app.checkpoint {
+        return Paragraph::new(format!(
             "SENT TO AI:\n{}\n\nRESPONSE:\n{}\n\n> feedback: {}\n\n[Enter] continue (or re-plan with feedback)   [Esc] abort",
             checkpoint.prompt.trim(),
             checkpoint.output.trim(),
             app.feedback
         ))
         .block(Block::bordered().title(format!(" checkpoint: {} ", checkpoint.step)))
-        .wrap(Wrap { trim: false }),
-        (None, Some(status)) => Paragraph::new(format!("finished: {status:?}\n\n[q] quit"))
-            .block(Block::bordered().title(" done ")),
-        (None, None) => {
-            Paragraph::new("running…").block(Block::bordered().title(" status "))
-        }
-    };
-    frame.render_widget(panel, areas[1]);
+        .wrap(Wrap { trim: false });
+    }
+    if app.mode == Mode::Running {
+        return Paragraph::new("working…").block(Block::bordered().title(" status "));
+    }
+    // Input mode: show the last answer/result and the prompt line.
+    let mut body = String::new();
+    if let Some(answer) = &app.answer {
+        body.push_str(answer.trim());
+        body.push_str("\n\n");
+    } else if let Some(status) = app.done {
+        body.push_str(&format!("finished: {status:?}\n\n"));
+    }
+    body.push_str(&format!(
+        "> {}\n\n[Enter] run a task   ?question → ask about the code   [Esc] quit",
+        app.input
+    ));
+    Paragraph::new(body)
+        .block(Block::bordered().title(" bide "))
+        .wrap(Wrap { trim: false })
 }
 
 fn help() -> ExitCode {
     println!(
         "bide — a deterministic workflow engine.\n\n\
          Usage:\n  \
-           bide run \"<task>\" [flags]   run in the terminal (line-based)\n  \
-           bide tui \"<task>\" [flags]   run in an interactive terminal UI\n  \
+           bide                        interactive workspace (type tasks or ?questions)\n  \
+           bide run \"<task>\" [flags]   run once in the terminal (line-based)\n  \
+           bide tui \"<task>\" [flags]   run a task in the interactive UI\n  \
            bide doctor\n  \
            bide help\n\n\
          Run flags (each also has a BIDE_* env var):\n  \

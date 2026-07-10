@@ -1,100 +1,121 @@
 use bide::dispatch::Control;
-use bide::tui::{App, Key, StepStatus, UiEvent};
+use bide::tui::{App, Key, Mode, Reaction, StepStatus, UiEvent};
 use bide::{Status, StepOutcome};
 
-fn app() -> App {
-    App::new(vec!["plan".to_string(), "implement".to_string()])
+fn typed(app: &mut App, text: &str) {
+    for c in text.chars() {
+        app.on_key(Key::Char(c));
+    }
 }
 
 #[test]
-fn starts_with_every_step_pending() {
-    let app = app();
-    assert_eq!(app.steps.len(), 2);
+fn starts_in_input_mode() {
+    let app = App::new();
+    assert_eq!(app.mode, Mode::Input);
+    assert!(app.steps.is_empty());
+}
+
+#[test]
+fn typing_a_task_and_enter_runs_it() {
+    let mut app = App::new();
+    typed(&mut app, "add jwt");
+    assert_eq!(app.input, "add jwt");
+    assert_eq!(app.on_key(Key::Enter), Reaction::RunTask("add jwt".to_string()));
+    assert!(app.input.is_empty());
+}
+
+#[test]
+fn a_question_prefix_asks_instead_of_running() {
+    let mut app = App::new();
+    typed(&mut app, "? how does resume work");
+    assert_eq!(
+        app.on_key(Key::Enter),
+        Reaction::AskQuestion("how does resume work".to_string())
+    );
+}
+
+#[test]
+fn esc_in_input_quits() {
+    let mut app = App::new();
+    assert_eq!(app.on_key(Key::Esc), Reaction::Quit);
+}
+
+#[test]
+fn empty_input_does_nothing() {
+    let mut app = App::new();
+    assert_eq!(app.on_key(Key::Enter), Reaction::None);
+}
+
+#[test]
+fn start_run_sets_steps_pending_and_running_mode() {
+    let mut app = App::new();
+    app.start_run(vec!["plan".to_string(), "implement".to_string()]);
+    assert_eq!(app.mode, Mode::Running);
     assert!(app.steps.iter().all(|s| s.status == StepStatus::Pending));
 }
 
 #[test]
 fn events_update_step_status() {
-    let mut app = app();
+    let mut app = App::new();
+    app.start_run(vec!["plan".to_string()]);
     app.apply(UiEvent::StepStarted("plan".to_string()));
     assert_eq!(app.steps[0].status, StepStatus::Running);
-
     app.apply(UiEvent::StepFinished("plan".to_string(), StepOutcome::Success));
     assert_eq!(app.steps[0].status, StepStatus::Done(StepOutcome::Success));
 }
 
 #[test]
-fn a_checkpoint_event_opens_the_panel() {
-    let mut app = app();
+fn a_checkpoint_lets_the_user_continue_or_retry_with_feedback() {
+    let mut app = App::new();
+    app.start_run(vec!["plan".to_string()]);
     app.apply(UiEvent::Checkpoint {
         step: "plan".to_string(),
-        prompt: "please plan this".to_string(),
-        output: "the plan body".to_string(),
+        prompt: "prompt".to_string(),
+        output: "the plan".to_string(),
     });
-    let checkpoint = app.checkpoint.as_ref().expect("checkpoint open");
-    assert_eq!(checkpoint.output, "the plan body");
-    assert_eq!(checkpoint.prompt, "please plan this");
-}
+    assert_eq!(app.checkpoint.as_ref().unwrap().output, "the plan");
 
-#[test]
-fn keys_do_nothing_without_an_open_checkpoint() {
-    let mut app = app();
-    assert_eq!(app.on_key(Key::Enter), None);
-}
+    // Enter with no feedback continues.
+    assert_eq!(app.on_key(Key::Enter), Reaction::Decide(Control::Continue));
 
-#[test]
-fn typing_edits_the_feedback_field() {
-    let mut app = app();
+    // With feedback it retries.
     app.apply(UiEvent::Checkpoint {
         step: "plan".to_string(),
         prompt: String::new(),
         output: String::new(),
     });
-    app.on_key(Key::Char('h'));
-    app.on_key(Key::Char('i'));
-    assert_eq!(app.feedback, "hi");
-    app.on_key(Key::Backspace);
-    assert_eq!(app.feedback, "h");
+    typed(&mut app, "simpler");
+    assert_eq!(
+        app.on_key(Key::Enter),
+        Reaction::Decide(Control::Retry("simpler".to_string()))
+    );
 }
 
 #[test]
-fn enter_without_feedback_continues() {
-    let mut app = app();
+fn esc_at_a_checkpoint_aborts() {
+    let mut app = App::new();
+    app.start_run(vec!["plan".to_string()]);
     app.apply(UiEvent::Checkpoint {
         step: "plan".to_string(),
         prompt: String::new(),
         output: String::new(),
     });
-    assert_eq!(app.on_key(Key::Enter), Some(Control::Continue));
-    assert!(app.checkpoint.is_none());
+    assert_eq!(app.on_key(Key::Esc), Reaction::Decide(Control::Abort));
 }
 
 #[test]
-fn enter_with_feedback_retries_with_it() {
-    let mut app = app();
-    app.apply(UiEvent::Checkpoint {
-        step: "plan".to_string(),
-        prompt: String::new(),
-        output: String::new(),
-    });
-    app.on_key(Key::Char('x'));
-    assert_eq!(app.on_key(Key::Enter), Some(Control::Retry("x".to_string())));
+fn an_answer_event_is_stored() {
+    let mut app = App::new();
+    app.start_question();
+    app.apply(UiEvent::Answer("here is the code".to_string()));
+    assert_eq!(app.answer.as_deref(), Some("here is the code"));
 }
 
 #[test]
-fn esc_aborts() {
-    let mut app = app();
-    app.apply(UiEvent::Checkpoint {
-        step: "plan".to_string(),
-        prompt: String::new(),
-        output: String::new(),
-    });
-    assert_eq!(app.on_key(Key::Esc), Some(Control::Abort));
-}
-
-#[test]
-fn a_finished_event_records_the_status() {
-    let mut app = app();
+fn finishing_returns_to_input_mode() {
+    let mut app = App::new();
+    app.start_run(vec!["plan".to_string()]);
     app.apply(UiEvent::Finished(Status::Accepted));
     assert_eq!(app.done, Some(Status::Accepted));
+    assert_eq!(app.mode, Mode::Input);
 }
