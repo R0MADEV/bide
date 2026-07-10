@@ -1,4 +1,4 @@
-use bide::route::{guess, route_prompt, Guess, Turn};
+use bide::route::{guess, is_hedged_task, is_task_reply, route_prompt, Guess, Turn};
 
 #[test]
 fn obvious_tasks_are_tasks() {
@@ -41,6 +41,33 @@ fn prompt_replays_recent_turns_for_follow_ups() {
     assert!(prompt.contains("what is the engine"));
     assert!(prompt.contains("it runs steps"));
     assert!(prompt.contains("and where is that used?"));
+}
+
+#[test]
+fn only_an_exact_task_reply_starts_a_workflow() {
+    assert!(is_task_reply("TASK"));
+    assert!(is_task_reply("  task\n"));
+    // The model hedges: blurts TASK then reconsiders. That is not a task.
+    assert!(!is_task_reply(
+        "TASK\n\nWait — this names no concrete target."
+    ));
+    assert!(!is_task_reply("This is a question, here is the answer…"));
+}
+
+#[test]
+fn a_leaked_task_token_is_detected_as_a_hedge() {
+    assert!(is_hedged_task("TASK\n\nWait — let me reconsider."));
+    assert!(is_hedged_task("task, but actually this is vague"));
+    // A clean task or a real answer is not a hedge.
+    assert!(!is_hedged_task("TASK"));
+    assert!(!is_hedged_task("This function lives in src/main.rs."));
+}
+
+#[test]
+fn the_prompt_biases_toward_answering_not_tasking() {
+    let prompt = route_prompt(&[], "what do you think about adding something?");
+    assert!(prompt.contains("TASK"));
+    assert!(prompt.to_lowercase().contains("when in doubt"));
 }
 
 #[test]
