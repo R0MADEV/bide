@@ -87,3 +87,13 @@ fn idle_layout_is_a_single_panel_without_a_sidebar() {
     assert!(!screen.contains("steps"), "sidebar should be absent when idle");
     assert!(screen.contains("[Enter] send"), "input hint missing");
 }
+
+#[test]
+fn multiline_input_grows_and_shows_real_lines() {
+    let mut app = App::new();
+    app.paste("Arregla el login de Microsoft\ny muestra el selector de cuenta");
+    let screen = snapshot(&app, 70, 12);
+    println!("\n{screen}");
+    assert!(screen.contains("Arregla el login de Microsoft"));
+    assert!(screen.contains("y muestra el selector de cuenta"));
+}

@@ -25,7 +25,8 @@ pub struct View {
 /// Draw the whole workspace: the transcript, an optional step sidebar, and the
 /// input/status line.
 pub fn draw(frame: &mut Frame, app: &App, view: &View) {
-    let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(frame.area());
+    let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(input_height(app))])
+        .split(frame.area());
     let has_steps = !app.steps.is_empty();
     let (main_area, sidebar_area) = if has_steps {
         let cols = Layout::horizontal([Constraint::Min(0), Constraint::Length(SIDEBAR_WIDTH)])
@@ -90,15 +91,16 @@ fn sidebar(app: &App, view: &View) -> Paragraph<'static> {
     Paragraph::new(body).block(Block::bordered().title(" steps "))
 }
 
-/// The bottom line: a checkpoint's feedback prompt, a spinner while a task runs,
-/// or the input prompt when idle.
+/// The bottom box: a checkpoint's feedback prompt, a spinner while a task runs,
+/// or the input prompt when idle. The editable ones grow to show multi-line text
+/// as real lines, with the key hints on the last line.
 fn input_line(app: &App, view: &View) -> Paragraph<'static> {
     if let Some(checkpoint) = &app.checkpoint {
-        return bar(format!(
-            "feedback › {}    [Enter] continue · [Esc] abort",
-            one_line(&app.feedback)
-        ))
-        .block(Block::bordered().title(format!(" checkpoint: {} ", checkpoint.step)));
+        let body = format!(
+            "feedback › {}\n[Enter] continue · [⇧↵] newline · [Esc] abort",
+            app.feedback
+        );
+        return bar(body).block(Block::bordered().title(format!(" checkpoint: {} ", checkpoint.step)));
     }
     if app.mode == Mode::Running {
         let spin = SPINNER[view.tick % SPINNER.len()];
@@ -108,21 +110,35 @@ fn input_line(app: &App, view: &View) -> Paragraph<'static> {
             view.elapsed_secs
         ));
     }
-    bar(format!(
-        "› {}    [Enter] send · [⇧↵] newline · [Esc] quit",
-        one_line(&app.input)
-    ))
-    .block(Block::bordered().title(" bide "))
+    let body = format!(
+        "› {}\n[Enter] send · [⇧↵] newline · [Esc] quit",
+        app.input
+    );
+    bar(body).block(Block::bordered().title(" bide "))
 }
 
-/// Collapse a multi-line input to one display line, marking breaks with ⏎, so a
-/// pasted block is visible in the single-line input bar.
-fn one_line(text: &str) -> String {
-    text.replace('\n', " ⏎ ")
+/// Height of the bottom box: one line while running, otherwise enough for the
+/// editable text (grown to fit line breaks, capped) plus the hint line and
+/// borders.
+fn input_height(app: &App) -> u16 {
+    if app.mode == Mode::Running && app.checkpoint.is_none() {
+        return 3;
+    }
+    let text = if app.checkpoint.is_some() {
+        &app.feedback
+    } else {
+        &app.input
+    };
+    let breaks = u16::try_from(text.matches('\n').count()).unwrap_or(0);
+    let text_rows = (breaks + 1).min(10);
+    // text rows + hint line + top/bottom borders.
+    text_rows + 3
 }
 
 fn bar(text: String) -> Paragraph<'static> {
-    Paragraph::new(text).block(Block::bordered())
+    Paragraph::new(text)
+        .block(Block::bordered())
+        .wrap(Wrap { trim: false })
 }
 
 fn active_step(app: &App) -> Option<&str> {
