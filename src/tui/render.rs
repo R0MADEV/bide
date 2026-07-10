@@ -96,7 +96,7 @@ fn input_line(app: &App, view: &View) -> Paragraph<'static> {
     if let Some(checkpoint) = &app.checkpoint {
         return bar(format!(
             "feedback › {}    [Enter] continue · [Esc] abort",
-            app.feedback
+            one_line(&app.feedback)
         ))
         .block(Block::bordered().title(format!(" checkpoint: {} ", checkpoint.step)));
     }
@@ -110,9 +110,15 @@ fn input_line(app: &App, view: &View) -> Paragraph<'static> {
     }
     bar(format!(
         "› {}    [Enter] send · [Esc] quit",
-        app.input
+        one_line(&app.input)
     ))
     .block(Block::bordered().title(" bide "))
+}
+
+/// Collapse a multi-line input to one display line, marking breaks with ⏎, so a
+/// pasted block is visible in the single-line input bar.
+fn one_line(text: &str) -> String {
+    text.replace('\n', " ⏎ ")
 }
 
 fn bar(text: String) -> Paragraph<'static> {

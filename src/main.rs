@@ -8,7 +8,10 @@ use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, ClaudeContext, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, Observer, StepHandler, StepReport};
 use bide::tui::{App, ChannelGate, ChannelObserver, Key as TuiKey, Mode, Reaction, UiEvent};
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+};
+use ratatui::crossterm::execute;
 use bide::tui::render::{draw, View};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -66,6 +69,9 @@ struct ActiveRun {
 /// observes and decides through the ports.
 fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
     let mut terminal = ratatui::init();
+    // Bracketed paste, so a multi-line paste arrives as one block instead of the
+    // first newline submitting it early.
+    let _ = execute!(io::stdout(), EnableBracketedPaste);
     let mut app = App::new();
     let mut active: Option<ActiveRun> = None;
     // Past exchanges, so a follow-up question carries context.
@@ -109,7 +115,14 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
         if !event::poll(Duration::from_millis(80)).unwrap_or(false) {
             continue;
         }
-        let Ok(Event::Key(key)) = event::read() else {
+        let Ok(event) = event::read() else {
+            continue;
+        };
+        if let Event::Paste(text) = event {
+            app.paste(&text);
+            continue;
+        }
+        let Event::Key(key) = event else {
             continue;
         };
         if key.kind != KeyEventKind::Press {
@@ -133,6 +146,7 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
         }
     }
 
+    let _ = execute!(io::stdout(), DisableBracketedPaste);
     ratatui::restore();
     ExitCode::SUCCESS
 }

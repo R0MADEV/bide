@@ -263,6 +263,16 @@ impl App {
         }
     }
 
+    /// Insert pasted text (which may span multiple lines) without submitting.
+    /// Goes to the checkpoint feedback when one is open, otherwise to the input.
+    pub fn paste(&mut self, text: &str) {
+        if self.checkpoint.is_some() {
+            self.feedback.push_str(text);
+        } else {
+            self.input.push_str(text);
+        }
+    }
+
     fn on_key_input(&mut self, key: Key) -> Reaction {
         match key {
             Key::Esc => Reaction::Quit,

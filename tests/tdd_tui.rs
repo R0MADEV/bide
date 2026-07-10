@@ -26,6 +26,27 @@ fn typing_and_enter_submits_the_text() {
 }
 
 #[test]
+fn pasting_multiline_text_fills_the_input_without_submitting() {
+    let mut app = App::new();
+    app.paste("first line\nsecond line");
+    assert_eq!(app.input, "first line\nsecond line");
+    assert_eq!(app.mode, Mode::Input);
+}
+
+#[test]
+fn pasting_at_a_checkpoint_goes_to_feedback() {
+    let mut app = App::new();
+    app.start_run(vec!["plan".to_string()]);
+    app.apply(UiEvent::Checkpoint {
+        step: "plan".to_string(),
+        prompt: String::new(),
+        output: String::new(),
+    });
+    app.paste("make it simpler");
+    assert_eq!(app.feedback, "make it simpler");
+}
+
+#[test]
 fn submitting_appends_the_prompt_to_the_transcript() {
     let mut app = App::new();
     typed(&mut app, "add jwt");
