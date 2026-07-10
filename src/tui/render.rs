@@ -14,6 +14,22 @@ const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧
 /// Width of the step sidebar, in columns.
 const SIDEBAR_WIDTH: u16 = 18;
 
+/// Block-art sitting cat (ported from the catunes player), shown as a sleeping
+/// mascot on the empty workspace. Row 2 is the (closed, sleeping) eyes.
+const CAT: &[&str] = &[
+    "        ▄▀▄       ▄▀▄",
+    "       █   ▀▄▄▄▄▄▀   █",
+    "      █  ‿         ‿  █",
+    " ───  █       ▄       █  ───",
+    " ──    █    ▀▀▀▀▀    █   ──",
+    "        ▀▄▄▄▄▄▄▄▄▄▄▄▀",
+    "▄▄▄▄▄▄▄▄█   █   █   █▄▄▄▄▄▄▄▄",
+    "        ▀▄▄▄▀   ▀▄▄▄▀",
+];
+const CAT_WIDTH: u16 = 29;
+/// Sleep bubble frames above the cat.
+const SLEEP: &[&str] = &["  z  ", " z Z ", "z Z z"];
+
 const ACCENT: Color = Color::Cyan;
 const MUTED: Color = Color::DarkGray;
 const OK: Color = Color::Green;
@@ -44,11 +60,47 @@ pub fn draw(frame: &mut Frame, app: &App, view: &View) {
         (rows[0], None)
     };
 
-    frame.render_widget(transcript(app, view, main_area), main_area);
+    if is_fresh(app) {
+        frame.render_widget(cat_panel(view, main_area), main_area);
+    } else {
+        frame.render_widget(transcript(app, view, main_area), main_area);
+    }
     if let Some(area) = sidebar_area {
         frame.render_widget(sidebar(app, view), area);
     }
     frame.render_widget(input_line(app, view), rows[1]);
+}
+
+/// The empty workspace: nothing typed or run yet.
+fn is_fresh(app: &App) -> bool {
+    app.mode == Mode::Input
+        && app.log.is_empty()
+        && app.steps.is_empty()
+        && app.checkpoint.is_none()
+}
+
+/// The sleeping-cat mascot, centred in the panel, for the empty workspace.
+fn cat_panel(view: &View, area: Rect) -> Paragraph<'static> {
+    let inner_width = area.width.saturating_sub(2);
+    let inner_height = area.height.saturating_sub(2);
+    let margin = usize::from(inner_width.saturating_sub(CAT_WIDTH)) / 2;
+    let pad = " ".repeat(margin);
+    let content_height = u16::try_from(CAT.len()).unwrap_or(0) + 2;
+    let top = usize::from(inner_height.saturating_sub(content_height)) / 2;
+
+    let mut lines: Vec<Line> = vec![Line::raw(""); top];
+    let bubble = SLEEP[(view.tick / 5) % SLEEP.len()];
+    lines.push(Line::styled(
+        format!("{pad}            {bubble}"),
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+    ));
+    for row in CAT {
+        lines.push(Line::styled(
+            format!("{pad}{row}"),
+            Style::default().fg(ACCENT),
+        ));
+    }
+    Paragraph::new(Text::from(lines)).block(panel(header_title(&view.header)))
 }
 
 /// A rounded panel with a muted border and the given title line.

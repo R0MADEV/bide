@@ -131,3 +131,11 @@ fn turns_are_separated_by_a_blank_line() {
     assert!(screen.contains("first answer"));
     assert!(screen.contains("second question"));
 }
+
+#[test]
+fn the_empty_workspace_shows_the_cat() {
+    let screen = snapshot(&App::new(), 60, 18);
+    println!("\n{screen}");
+    assert!(screen.contains("▄▀▄"), "cat ears missing");
+    assert!(screen.contains("z"), "sleep bubble missing");
+}
