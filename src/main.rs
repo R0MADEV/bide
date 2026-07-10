@@ -5,7 +5,7 @@ use bide::agents::{
 use bide::cli::{parse, Command, RunOptions};
 use bide::config::{AgentSettings, Provider, ToolSettings};
 use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
-use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
+use bide::context::{build_context, ClaudeContext, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, Observer, StepHandler, StepReport};
 use bide::tui::{App, ChannelGate, ChannelObserver, Key as TuiKey, StepStatus, UiEvent};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -66,7 +66,7 @@ fn tui_command(options: &RunOptions) -> ExitCode {
         }
     };
     let policy = policy_from_config();
-    let context = context_pack(&options.task, use_lexis(options), &tools.lexis);
+    let context = context_pack(&options.task, context_choice(options).as_deref(), &tools);
     let step_names: Vec<String> = workflow.steps.iter().map(|s| s.name.clone()).collect();
 
     let (events_tx, events_rx) = mpsc::channel::<UiEvent>();
@@ -187,7 +187,7 @@ fn help() -> ExitCode {
            --branch            put the run's changes on a bide/<slug> branch\n  \
            --pr                push the branch and open a pull request\n  \
            --agent <name>      reasoning backend: claude | stub (else [agent] in bide.toml)\n  \
-           --context <name>    context source: lexis\n  \
+           --context <name>    context source: claude (Claude Code + lexis) | lexis\n  \
            --resume <id>       continue a previous run from where it stopped"
     );
     ExitCode::SUCCESS
@@ -282,7 +282,7 @@ fn run_task(options: &RunOptions) -> ExitCode {
     println!("agent: {}", agent.label());
     println!("git: {}\n", git_state());
     let clean_at_start = GitCli.status().clean;
-    let context = context_pack(task, use_lexis(options), &tools.lexis);
+    let context = context_pack(task, context_choice(options).as_deref(), &tools);
     println!("context:\n{}\n", context.text);
     print_plan(&workflow);
 
@@ -358,9 +358,11 @@ fn load_state(id: &str) -> Result<RunState, String> {
     serde_json::from_str(&text).map_err(|error| format!("invalid state for {id}: {error}"))
 }
 
-fn use_lexis(options: &RunOptions) -> bool {
-    let by_flag = options.context.as_deref() == Some("lexis");
-    by_flag || matches!(std::env::var("BIDE_CONTEXT").as_deref(), Ok("lexis"))
+fn context_choice(options: &RunOptions) -> Option<String> {
+    options
+        .context
+        .clone()
+        .or_else(|| std::env::var("BIDE_CONTEXT").ok())
 }
 
 fn record_run(record: &RunRecord, id: &str) -> Option<PathBuf> {
@@ -567,19 +569,22 @@ fn policy_from_config() -> Policy {
     }
 }
 
-fn context_pack(task: &str, use_lexis: bool, lexis: &str) -> ContextPack {
-    let mut provider = context_provider(use_lexis, lexis);
+fn context_pack(task: &str, choice: Option<&str>, tools: &ToolSettings) -> ContextPack {
+    let mut provider = context_provider(choice, tools);
     build_context(provider.as_mut(), task)
 }
 
-/// Use Lexis for context when opted in, otherwise none. Keeps `bide run` working
-/// without Lexis installed.
-fn context_provider(use_lexis: bool, lexis: &str) -> Box<dyn CodeContext> {
-    if use_lexis {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        return Box::new(LexisAsk::new(cwd, lexis));
+/// Pick the context source. `claude` runs Claude Code with the lexis tools to
+/// fetch real code; `lexis` runs `lexis ask`; anything else gives no context.
+fn context_provider(choice: Option<&str>, tools: &ToolSettings) -> Box<dyn CodeContext> {
+    match choice {
+        Some("claude") => Box::new(ClaudeContext::new(&tools.claude)),
+        Some("lexis") => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            Box::new(LexisAsk::new(cwd, &tools.lexis))
+        }
+        _ => Box::new(NoContext),
     }
-    Box::new(NoContext)
 }
 
 /// Tool binaries from the [tools] section of bide.toml, defaulting to PATH names.

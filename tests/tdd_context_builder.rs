@@ -1,4 +1,12 @@
-use bide::context::{build_context, CodeContext};
+use bide::context::{build_context, retrieval_prompt, CodeContext};
+
+#[test]
+fn the_retrieval_prompt_asks_lexis_for_the_task_code() {
+    let prompt = retrieval_prompt("add jwt auth");
+    assert!(prompt.contains("add jwt auth"));
+    assert!(prompt.contains("lexis"));
+    assert!(prompt.to_lowercase().contains("do not edit") || prompt.contains("not implement"));
+}
 
 struct FakeContext(String);
 
