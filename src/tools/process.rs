@@ -1,28 +1,21 @@
 use super::{CommandResult, Shell};
+use crate::exec;
 use std::process::Command;
+use std::time::Duration;
+
+const TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Runs commands through the platform shell. Only reached after the Policy
-/// Engine has allowed the command.
+/// Engine has allowed the command, and always under a timeout.
 #[derive(Debug, Default)]
 pub struct ProcessShell;
 
 impl Shell for ProcessShell {
     fn run(&mut self, command: &str) -> CommandResult {
-        let Ok(output) = shell_command(command).output() else {
-            return CommandResult {
-                success: false,
-                output: "failed to spawn command".to_string(),
-            };
-        };
-
-        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.trim().is_empty() {
-            text.push_str(&stderr);
-        }
+        let captured = exec::run(shell_command(command), TIMEOUT);
         CommandResult {
-            success: output.status.success(),
-            output: text,
+            success: captured.success,
+            output: captured.merged(),
         }
     }
 }

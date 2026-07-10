@@ -1,6 +1,10 @@
 use super::CodeContext;
+use crate::exec;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
+
+const TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Repository context from Lexis: runs `lexis ask` for the task and returns its
 /// synthesized answer. Only reached when the workflow opts into Lexis.
@@ -16,19 +20,12 @@ impl LexisAsk {
 
 impl CodeContext for LexisAsk {
     fn lookup(&mut self, task: &str) -> String {
-        let output = Command::new("lexis")
-            .arg("ask")
-            .arg(task)
-            .arg("-p")
-            .arg(&self.path)
-            .output();
-
-        let Ok(output) = output else {
-            return String::new();
-        };
-        if !output.status.success() {
+        let mut command = Command::new("lexis");
+        command.arg("ask").arg(task).arg("-p").arg(&self.path);
+        let captured = exec::run(command, TIMEOUT);
+        if !captured.success {
             return String::new();
         }
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
+        captured.stdout.trim().to_string()
     }
 }

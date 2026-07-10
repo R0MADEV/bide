@@ -1,6 +1,10 @@
 use super::protocol::{build_prompt, response_from};
 use super::{AgentRequest, AgentResponse, AgentRunner};
+use crate::exec;
 use std::process::Command;
+use std::time::Duration;
+
+const TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Runs the external agent for one prompt and returns its raw output. The port
 /// that isolates spawning the `claude` CLI from the prompt/verdict logic.
@@ -42,16 +46,12 @@ struct ClaudeCli;
 
 impl AgentProcess for ClaudeCli {
     fn run(&mut self, prompt: &str) -> AgentProcessResult {
-        let output = Command::new("claude").arg("--print").arg(prompt).output();
-        let Ok(output) = output else {
-            return AgentProcessResult {
-                success: false,
-                stdout: String::new(),
-            };
-        };
+        let mut command = Command::new("claude");
+        command.arg("--print").arg(prompt);
+        let captured = exec::run(command, TIMEOUT);
         AgentProcessResult {
-            success: output.status.success(),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            success: captured.success,
+            stdout: captured.stdout,
         }
     }
 }

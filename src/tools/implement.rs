@@ -1,8 +1,12 @@
 use crate::board::Blackboard;
 use crate::core::{Step, StepOutcome};
 use crate::dispatch::{StepHandler, StepReport};
+use crate::exec;
 use std::fmt::Write as _;
 use std::process::Command;
+use std::time::Duration;
+
+const TIMEOUT: Duration = Duration::from_secs(900);
 
 /// Carries out an implementation by editing the repository. The port isolates
 /// the Claude Code driver so the step logic can be tested without editing files.
@@ -60,22 +64,16 @@ pub struct ClaudeCodeImplementer;
 
 impl Implementer for ClaudeCodeImplementer {
     fn implement(&mut self, prompt: &str) -> ImplementResult {
-        let output = Command::new("claude")
+        let mut command = Command::new("claude");
+        command
             .arg("-p")
             .arg(prompt)
             .arg("--permission-mode")
-            .arg("acceptEdits")
-            .output();
-
-        let Ok(output) = output else {
-            return ImplementResult {
-                success: false,
-                summary: "failed to run claude".to_string(),
-            };
-        };
+            .arg("acceptEdits");
+        let captured = exec::run(command, TIMEOUT);
         ImplementResult {
-            success: output.status.success(),
-            summary: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            success: captured.success,
+            summary: captured.merged().trim().to_string(),
         }
     }
 }

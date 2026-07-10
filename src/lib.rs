@@ -5,6 +5,7 @@ pub mod config;
 pub mod context;
 pub mod core;
 pub mod doctor;
+pub mod exec;
 pub mod git;
 pub mod dispatch;
 pub mod policy;
