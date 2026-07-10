@@ -5,6 +5,13 @@ use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(300);
 
+/// Read-only tools the retrieval agent may use headlessly: the lexis search
+/// tools plus the built-in file readers. No edit tools, so it can only look.
+const ALLOWED_TOOLS: &str = "mcp__lexis__search_code,mcp__lexis__get_symbol,\
+    mcp__lexis__read_file,mcp__lexis__list_symbols,mcp__lexis__outline,\
+    mcp__lexis__get_context,mcp__lexis__find_references,mcp__lexis__list_entrypoints,\
+    Read,Grep,Glob";
+
 /// Gathers repository context by running Claude Code headlessly and letting it
 /// use the lexis MCP tools to find and return the code relevant to the task.
 /// This is the retrieval agent: it reports real code, it does not edit.
@@ -23,7 +30,11 @@ impl ClaudeContext {
 impl CodeContext for ClaudeContext {
     fn lookup(&mut self, task: &str) -> String {
         let mut command = Command::new(&self.program);
-        command.arg("-p").arg(retrieval_prompt(task));
+        command
+            .arg("-p")
+            .arg(retrieval_prompt(task))
+            .arg("--allowedTools")
+            .arg(ALLOWED_TOOLS);
         let captured = exec::run(command, TIMEOUT);
         if !captured.success {
             return String::new();
