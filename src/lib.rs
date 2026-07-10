@@ -12,5 +12,6 @@ pub mod dispatch;
 pub mod policy;
 pub mod report;
 pub mod tools;
+pub mod tui;
 
 pub use core::{run, run_from, OnFailure, Status, Step, StepOutcome, StepRunner, Task, Workflow};
