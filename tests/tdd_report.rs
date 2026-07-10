@@ -39,6 +39,19 @@ fn report_includes_the_diff_when_present() {
 }
 
 #[test]
+fn save_writes_one_artifact_file_per_step() {
+    let runs_dir = std::env::temp_dir().join("bide-test-runs-steps");
+    let _ = std::fs::remove_dir_all(&runs_dir);
+
+    save(&sample(), &runs_dir, "run-x").expect("save");
+    let step_file = runs_dir.join("run-x/steps/01-plan.md");
+    let content = std::fs::read_to_string(&step_file).expect("read step file");
+
+    assert!(content.contains("the plan body"));
+    let _ = std::fs::remove_dir_all(&runs_dir);
+}
+
+#[test]
 fn save_writes_a_report_file_under_the_run_id() {
     let runs_dir = std::env::temp_dir().join("bide-test-runs");
     let _ = std::fs::remove_dir_all(&runs_dir);

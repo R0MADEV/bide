@@ -44,5 +44,25 @@ pub fn save(record: &RunRecord, runs_dir: &Path, id: &str) -> io::Result<PathBuf
     fs::create_dir_all(&dir)?;
     let path = dir.join("report.md");
     fs::write(&path, render(record))?;
+    save_step_artifacts(&dir, &record.steps)?;
     Ok(path)
+}
+
+fn save_step_artifacts(dir: &Path, steps: &[StepRecord]) -> io::Result<()> {
+    if steps.is_empty() {
+        return Ok(());
+    }
+    let steps_dir = dir.join("steps");
+    fs::create_dir_all(&steps_dir)?;
+    for (index, step) in steps.iter().enumerate() {
+        let file = steps_dir.join(format!("{:02}-{}.md", index + 1, file_slug(&step.name)));
+        fs::write(file, &step.output)?;
+    }
+    Ok(())
+}
+
+fn file_slug(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
