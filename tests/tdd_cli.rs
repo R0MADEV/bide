@@ -14,9 +14,33 @@ fn parses_run_with_task_description() {
     assert_eq!(
         command,
         Command::Run {
-            task: "add jwt to the backend".to_string()
+            task: "add jwt to the backend".to_string(),
+            yes: false,
         }
     );
+}
+
+#[test]
+fn parses_the_yes_flag_before_or_after_the_task() {
+    assert_eq!(
+        parse(args(&["run", "add jwt", "--yes"])).unwrap(),
+        Command::Run {
+            task: "add jwt".to_string(),
+            yes: true,
+        }
+    );
+    assert_eq!(
+        parse(args(&["run", "-y", "add jwt"])).unwrap(),
+        Command::Run {
+            task: "add jwt".to_string(),
+            yes: true,
+        }
+    );
+}
+
+#[test]
+fn an_unknown_flag_is_an_error() {
+    assert!(parse(args(&["run", "add jwt", "--nope"])).is_err());
 }
 
 #[test]

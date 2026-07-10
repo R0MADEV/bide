@@ -31,7 +31,7 @@ fn main() -> ExitCode {
     };
 
     match command {
-        Command::Run { task } => run_task(&task),
+        Command::Run { task, yes } => run_task(&task, yes),
         Command::Doctor => doctor(),
     }
 }
@@ -79,7 +79,7 @@ fn config_state() -> ConfigState {
     }
 }
 
-fn run_task(task: &str) -> ExitCode {
+fn run_task(task: &str, yes: bool) -> ExitCode {
     let workflow = match resolve_workflow() {
         Ok(workflow) => workflow,
         Err(message) => {
@@ -104,7 +104,7 @@ fn run_task(task: &str) -> ExitCode {
     print_plan(&workflow);
 
     let mut dispatcher = build_dispatcher(&workflow, task, &context.text, &agent);
-    dispatcher.set_gate(make_gate());
+    dispatcher.set_gate(make_gate(yes));
     let status = run(&workflow, &mut dispatcher);
 
     println!("\nfinished: {status:?}");
@@ -380,9 +380,9 @@ impl AgentRunner for StubAgent {
     }
 }
 
-/// Interactive by default; BIDE_YES=1 runs straight through without stopping.
-fn make_gate() -> Box<dyn Gate> {
-    let auto = matches!(std::env::var("BIDE_YES").as_deref(), Ok("1"));
+/// Interactive by default; `--yes` or BIDE_YES=1 runs straight through.
+fn make_gate(yes: bool) -> Box<dyn Gate> {
+    let auto = yes || matches!(std::env::var("BIDE_YES").as_deref(), Ok("1"));
     if auto {
         return Box::new(AutoGate);
     }
