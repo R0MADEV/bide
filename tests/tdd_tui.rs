@@ -16,22 +16,21 @@ fn starts_in_input_mode() {
 }
 
 #[test]
-fn typing_a_task_and_enter_runs_it() {
+fn typing_and_enter_submits_the_text() {
     let mut app = App::new();
     typed(&mut app, "add jwt");
     assert_eq!(app.input, "add jwt");
-    assert_eq!(app.on_key(Key::Enter), Reaction::RunTask("add jwt".to_string()));
+    assert_eq!(app.on_key(Key::Enter), Reaction::Submit("add jwt".to_string()));
     assert!(app.input.is_empty());
 }
 
 #[test]
-fn a_question_prefix_asks_instead_of_running() {
+fn a_steps_event_populates_the_step_list() {
     let mut app = App::new();
-    typed(&mut app, "? how does resume work");
-    assert_eq!(
-        app.on_key(Key::Enter),
-        Reaction::AskQuestion("how does resume work".to_string())
-    );
+    app.start_question();
+    app.apply(UiEvent::Steps(vec!["plan".to_string(), "implement".to_string()]));
+    assert_eq!(app.steps.len(), 2);
+    assert!(app.steps.iter().all(|s| s.status == StepStatus::Pending));
 }
 
 #[test]

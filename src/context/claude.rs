@@ -29,18 +29,24 @@ impl ClaudeContext {
 
 impl CodeContext for ClaudeContext {
     fn lookup(&mut self, task: &str) -> String {
-        let mut command = Command::new(&self.program);
-        command
-            .arg("-p")
-            .arg(retrieval_prompt(task))
-            .arg("--allowedTools")
-            .arg(ALLOWED_TOOLS);
-        let captured = exec::run(command, TIMEOUT);
-        if !captured.success {
-            return String::new();
-        }
-        captured.stdout.trim().to_string()
+        ask_claude(&self.program, &retrieval_prompt(task))
     }
+}
+
+/// Runs Claude Code headlessly with the lexis read tools allowed and returns its
+/// reply. Shared by context retrieval and the interactive router.
+pub fn ask_claude(program: &str, prompt: &str) -> String {
+    let mut command = Command::new(program);
+    command
+        .arg("-p")
+        .arg(prompt)
+        .arg("--allowedTools")
+        .arg(ALLOWED_TOOLS);
+    let captured = exec::run(command, TIMEOUT);
+    if !captured.success {
+        return String::new();
+    }
+    captured.stdout.trim().to_string()
 }
 
 pub fn retrieval_prompt(task: &str) -> String {

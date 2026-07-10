@@ -26,6 +26,7 @@ pub struct StepView {
 /// What the running engine tells the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiEvent {
+    Steps(Vec<String>),
     StepStarted(String),
     StepFinished(String, StepOutcome),
     Checkpoint {
@@ -59,12 +60,12 @@ pub enum Mode {
     Running,
 }
 
-/// What a key press asks the binary to do.
+/// What a key press asks the binary to do. The binary decides (with the AI)
+/// whether a submission is a task or a question.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reaction {
     None,
-    RunTask(String),
-    AskQuestion(String),
+    Submit(String),
     Decide(Control),
     Quit,
 }
@@ -125,6 +126,15 @@ impl App {
 
     pub fn apply(&mut self, event: UiEvent) {
         match event {
+            UiEvent::Steps(names) => {
+                self.steps = names
+                    .into_iter()
+                    .map(|name| StepView {
+                        name,
+                        status: StepStatus::Pending,
+                    })
+                    .collect();
+            }
             UiEvent::StepStarted(name) => self.set_status(&name, StepStatus::Running),
             UiEvent::StepFinished(name, outcome) => self.set_status(&name, StepStatus::Done(outcome)),
             UiEvent::Checkpoint {
@@ -196,10 +206,7 @@ impl App {
         if text.is_empty() {
             return Reaction::None;
         }
-        match text.strip_prefix('?') {
-            Some(question) => Reaction::AskQuestion(question.trim().to_string()),
-            None => Reaction::RunTask(text),
-        }
+        Reaction::Submit(text)
     }
 
     fn resolve(&mut self) -> Control {

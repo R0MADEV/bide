@@ -69,7 +69,7 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
 
     if let Some(task) = autostart {
         if !task.trim().is_empty() {
-            active = spawn_workflow(&task, options, &mut app);
+            active = Some(spawn_route(&task, options, &mut app));
         }
     }
 
@@ -100,8 +100,7 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
         };
         match app.on_key(mapped) {
             Reaction::Quit => break,
-            Reaction::RunTask(task) => active = spawn_workflow(&task, options, &mut app),
-            Reaction::AskQuestion(question) => active = Some(spawn_question(&question, options, &mut app)),
+            Reaction::Submit(text) => active = Some(spawn_route(&text, options, &mut app)),
             Reaction::Decide(control) => {
                 if let Some(run) = &active {
                     let _ = run.decisions.send(control);
@@ -115,78 +114,38 @@ fn repl(options: &RunOptions, autostart: Option<String>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Resolve everything and spawn the workflow worker. Returns None (and shows the
-/// error) if the agent/config could not be resolved.
-fn spawn_workflow(task: &str, options: &RunOptions, app: &mut App) -> Option<ActiveRun> {
-    let workflow = match resolve_workflow() {
-        Ok(workflow) => workflow,
-        Err(message) => return fail_run(app, &message),
-    };
-    let tools = tools_from_config();
-    let agent = match resolve_agent(options.agent.as_deref(), &tools.claude) {
-        Ok(agent) => agent,
-        Err(message) => return fail_run(app, &message),
-    };
-    let policy = policy_from_config();
-    let context = context_pack(task, context_choice(options).as_deref(), &tools);
-
-    app.start_run(workflow.steps.iter().map(|s| s.name.clone()).collect());
+/// Spawn a worker that first lets the AI decide whether the input is a QUESTION
+/// (answer it with Claude+lexis) or a TASK (run the workflow) — no `?` needed.
+fn spawn_route(input: &str, options: &RunOptions, app: &mut App) -> ActiveRun {
+    app.start_question();
 
     let (events_tx, events) = mpsc::channel::<UiEvent>();
     let (decisions, decisions_rx) = mpsc::channel::<Control>();
-    let task = task.to_string();
-    let claude = tools.claude.clone();
-    let context_text = context.text;
-    let id = run_id();
+    let input = input.to_string();
+    let agent_flag = options.agent.clone();
+    let context_flag = context_choice(options);
     let handle = thread::spawn(move || {
-        let mut dispatcher =
-            build_dispatcher(&workflow, &task, &context_text, &agent, &policy, &claude);
-        dispatcher.set_observer(Box::new(ChannelObserver::new(events_tx.clone())));
-        dispatcher.set_gate(Box::new(ChannelGate::new(events_tx.clone(), decisions_rx)));
-        let mut state = Task::new();
-        let status = run_from(&workflow, &mut dispatcher, &mut state);
-
-        let diff = GitCli.diff();
-        save_state(
-            &id,
-            &RunState {
-                task: task.clone(),
-                cursor: state.cursor(),
-                board: dispatcher.board_entries().to_vec(),
-            },
+        let tools = tools_from_config();
+        let reply = bide::context::ask_claude(&tools.claude, &route_prompt(&input));
+        let is_task = reply.trim().eq_ignore_ascii_case("TASK") || reply.trim().starts_with("TASK");
+        if !is_task {
+            let answer = if reply.trim().is_empty() {
+                "(no answer — is claude available?)".to_string()
+            } else {
+                reply
+            };
+            let _ = events_tx.send(UiEvent::Answer(answer));
+            let _ = events_tx.send(UiEvent::Finished(Status::Accepted));
+            return;
+        }
+        run_workflow_worker(
+            &input,
+            agent_flag.as_deref(),
+            context_flag.as_deref(),
+            &tools,
+            &events_tx,
+            decisions_rx,
         );
-        let record = RunRecord {
-            task,
-            steps: dispatcher.into_records(),
-            status,
-            diff,
-            context: context_text,
-        };
-        let _ = record_run(&record, &id);
-        let _ = events_tx.send(UiEvent::Finished(status));
-    });
-
-    Some(ActiveRun {
-        events,
-        decisions,
-        handle,
-    })
-}
-
-/// Answer a question with Claude Code + lexis, no workflow.
-fn spawn_question(question: &str, options: &RunOptions, app: &mut App) -> ActiveRun {
-    app.start_question();
-    let tools = tools_from_config();
-    let choice = context_choice(options).unwrap_or_else(|| "claude".to_string());
-
-    let (events_tx, events) = mpsc::channel::<UiEvent>();
-    let (decisions, _decisions_rx) = mpsc::channel::<Control>();
-    let question = question.to_string();
-    let handle = thread::spawn(move || {
-        let mut provider = context_provider(Some(choice.as_str()), &tools);
-        let answer = build_context(provider.as_mut(), &question).text;
-        let _ = events_tx.send(UiEvent::Answer(answer));
-        let _ = events_tx.send(UiEvent::Finished(Status::Accepted));
     });
 
     ActiveRun {
@@ -196,11 +155,71 @@ fn spawn_question(question: &str, options: &RunOptions, app: &mut App) -> Active
     }
 }
 
-fn fail_run(app: &mut App, message: &str) -> Option<ActiveRun> {
-    app.start_question();
-    app.apply(UiEvent::Answer(format!("error: {message}")));
-    app.apply(UiEvent::Finished(Status::Failed));
-    None
+fn route_prompt(input: &str) -> String {
+    format!(
+        "A user typed this into a coding tool: \"{input}\"\n\nIf it is a QUESTION \
+         about the codebase, answer it clearly using the lexis tools to read the \
+         real code. If it is a request to CHANGE, ADD or FIX code (a task to do), \
+         reply with EXACTLY the single word TASK and nothing else."
+    )
+}
+
+/// Resolve config and run the workflow inside a worker, streaming UI events and
+/// persisting the run. Errors are surfaced as an answer.
+fn run_workflow_worker(
+    task: &str,
+    agent_flag: Option<&str>,
+    context_flag: Option<&str>,
+    tools: &ToolSettings,
+    events_tx: &Sender<UiEvent>,
+    decisions_rx: Receiver<Control>,
+) {
+    let workflow = match resolve_workflow() {
+        Ok(workflow) => workflow,
+        Err(message) => return finish_with_error(events_tx, &message),
+    };
+    let agent = match resolve_agent(agent_flag, &tools.claude) {
+        Ok(agent) => agent,
+        Err(message) => return finish_with_error(events_tx, &message),
+    };
+    let policy = policy_from_config();
+    let context = context_pack(task, context_flag, tools);
+
+    let _ = events_tx.send(UiEvent::Steps(
+        workflow.steps.iter().map(|s| s.name.clone()).collect(),
+    ));
+
+    let mut dispatcher =
+        build_dispatcher(&workflow, task, &context.text, &agent, &policy, &tools.claude);
+    dispatcher.set_observer(Box::new(ChannelObserver::new(events_tx.clone())));
+    dispatcher.set_gate(Box::new(ChannelGate::new(events_tx.clone(), decisions_rx)));
+    let mut state = Task::new();
+    let status = run_from(&workflow, &mut dispatcher, &mut state);
+
+    let diff = GitCli.diff();
+    let id = run_id();
+    save_state(
+        &id,
+        &RunState {
+            task: task.to_string(),
+            cursor: state.cursor(),
+            board: dispatcher.board_entries().to_vec(),
+        },
+    );
+    let record = RunRecord {
+        task: task.to_string(),
+        steps: dispatcher.into_records(),
+        status,
+        diff,
+        context: context.text,
+    };
+    let _ = record_run(&record, &id);
+    let _ = events_tx.send(UiEvent::Finished(status));
+}
+
+fn finish_with_error(events_tx: &Sender<UiEvent>, message: &str) {
+    let _ = events_tx.send(UiEvent::Answer(format!("error: {message}")));
+    let _ = events_tx.send(UiEvent::Finished(Status::Failed));
 }
 
 fn map_key(code: KeyCode) -> Option<TuiKey> {
@@ -257,7 +276,7 @@ fn bottom_panel(app: &App) -> Paragraph<'static> {
         body.push_str(&format!("finished: {status:?}\n\n"));
     }
     body.push_str(&format!(
-        "> {}\n\n[Enter] run a task   ?question → ask about the code   [Esc] quit",
+        "> {}\n\n[Enter] send — bide decides: question → answered, task → workflow   [Esc] quit",
         app.input
     ));
     Paragraph::new(body)
