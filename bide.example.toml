@@ -9,6 +9,7 @@
 # provider = "openai"
 # model = "gpt-4o"
 # api_key_env = "OPENAI_API_KEY"
+# max_tokens = 4096   # cap on the model's reply length (default 4096)
 
 # Optional. Extra security rules added ON TOP of the built-in ones (rm -rf,
 # .env, ssh keys, ...). A command containing any deny_commands string is
@@ -25,7 +26,7 @@
 
 [workflow]
 # Retries allowed for a retry_from step before the run is marked Failed.
-max_retries = 2
+max_retries = 3
 
 [[workflow.step]]
 name = "build_context"
@@ -39,6 +40,11 @@ on_failure = "abort"
 pause = true
 
 [[workflow.step]]
+name = "critic"
+# If the critic rejects the plan, jump back and re-plan.
+on_failure = { retry_from = "plan" }
+
+[[workflow.step]]
 name = "implement"
 on_failure = "abort"
 
@@ -50,5 +56,12 @@ command = "cargo test"
 on_failure = { retry_from = "implement" }
 
 [[workflow.step]]
-name = "review"
+name = "diff"
+# Its output (the changes) reaches the review step through the blackboard.
+command = "git diff"
 on_failure = "abort"
+
+[[workflow.step]]
+name = "review"
+# If the reviewer rejects the changes, jump back and re-implement.
+on_failure = { retry_from = "implement" }
