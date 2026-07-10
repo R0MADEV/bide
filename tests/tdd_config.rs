@@ -47,7 +47,7 @@ fn parses_an_openai_agent_section() {
 
     assert_eq!(settings.provider, Provider::OpenAi);
     assert_eq!(settings.model, "gpt-4o");
-    assert_eq!(settings.api_key_env, "OPENAI_API_KEY");
+    assert_eq!(settings.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
 }
 
 #[test]
@@ -61,6 +61,20 @@ fn parses_an_anthropic_agent_section() {
 
     let settings = parse_agent(input).expect("valid").expect("agent present");
     assert_eq!(settings.provider, Provider::Anthropic);
+}
+
+#[test]
+fn parses_a_direct_api_key() {
+    let input = r#"
+        [agent]
+        provider = "openai"
+        model = "gpt-4o"
+        api_key = "sk-test"
+    "#;
+
+    let settings = parse_agent(input).expect("valid").expect("agent present");
+    assert_eq!(settings.api_key.as_deref(), Some("sk-test"));
+    assert!(settings.api_key_env.is_none());
 }
 
 #[test]

@@ -8,13 +8,17 @@ pub enum Provider {
     Anthropic,
 }
 
-/// The agent backend to reason with, from the `[agent]` section. The API key is
-/// never stored here: `api_key_env` names the environment variable that holds it.
+/// The agent backend to reason with, from the `[agent]` section. Provide the API
+/// key either securely via `api_key_env` (the NAME of an env var) or directly via
+/// `api_key` (convenient but plaintext in the file).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct AgentSettings {
     pub provider: Provider,
     pub model: String,
-    pub api_key_env: String,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
 }

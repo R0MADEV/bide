@@ -660,8 +660,21 @@ fn resolve_agent(flag: Option<&str>, claude: &str) -> Result<AgentKind, String> 
     let Some(settings) = settings else {
         return Ok(AgentKind::Stub);
     };
-    let api_key = read_key(&settings.api_key_env)?;
+    let api_key = resolve_key(&settings)?;
     Ok(AgentKind::Api { settings, api_key })
+}
+
+/// Prefer a direct api_key; otherwise read it from the named env var.
+fn resolve_key(settings: &AgentSettings) -> Result<String, String> {
+    if let Some(key) = &settings.api_key {
+        if !key.trim().is_empty() {
+            return Ok(key.clone());
+        }
+    }
+    if let Some(var) = &settings.api_key_env {
+        return read_key(var);
+    }
+    Err("[agent] needs api_key or api_key_env".to_string())
 }
 
 fn read_key(var: &str) -> Result<String, String> {
