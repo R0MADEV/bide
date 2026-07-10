@@ -4,8 +4,7 @@ mod process;
 
 pub use command_step::CommandStep;
 pub use implement::{
-    build_implement_prompt, ChangeSet, ClaudeCodeImplementer, ImplementResult, ImplementStep,
-    Implementer,
+    build_implement_prompt, ClaudeCodeImplementer, ImplementResult, ImplementStep, Implementer,
 };
 pub use process::ProcessShell;
 

@@ -1,6 +1,6 @@
 use bide::board::Blackboard;
 use bide::dispatch::StepHandler;
-use bide::tools::{build_implement_prompt, ChangeSet, ImplementResult, ImplementStep, Implementer};
+use bide::tools::{build_implement_prompt, ImplementResult, ImplementStep, Implementer};
 use bide::{Step, StepOutcome};
 
 struct FakeImplementer {
@@ -16,26 +16,13 @@ impl Implementer for FakeImplementer {
     }
 }
 
-struct FakeChanges(Vec<String>);
-
-impl ChangeSet for FakeChanges {
-    fn changed_files(&mut self) -> Vec<String> {
-        self.0.clone()
-    }
-}
-
-fn implement_step(success: bool, changed: &[&str]) -> ImplementStep {
-    let changes = FakeChanges(changed.iter().map(|s| s.to_string()).collect());
-    ImplementStep::new(
-        "add jwt",
-        Box::new(FakeImplementer { success }),
-        Box::new(changes),
-    )
+fn implement_step(success: bool) -> ImplementStep {
+    ImplementStep::new("add jwt", Box::new(FakeImplementer { success }))
 }
 
 #[test]
 fn a_successful_implementation_makes_the_step_succeed() {
-    let mut handler = implement_step(true, &["src/lib.rs"]);
+    let mut handler = implement_step(true);
     let report = handler.handle(&Step::abort("implement"), &Blackboard::new());
     assert_eq!(report.outcome, StepOutcome::Success);
     assert!(report.output.contains("edited 2 files"));
@@ -43,17 +30,9 @@ fn a_successful_implementation_makes_the_step_succeed() {
 
 #[test]
 fn a_failed_implementation_makes_the_step_fail() {
-    let mut handler = implement_step(false, &[]);
+    let mut handler = implement_step(false);
     let report = handler.handle(&Step::abort("implement"), &Blackboard::new());
     assert_eq!(report.outcome, StepOutcome::Failure);
-}
-
-#[test]
-fn editing_a_secret_path_fails_the_step_even_on_success() {
-    let mut handler = implement_step(true, &["src/lib.rs", ".env"]);
-    let report = handler.handle(&Step::abort("implement"), &Blackboard::new());
-    assert_eq!(report.outcome, StepOutcome::Failure);
-    assert!(report.output.contains(".env"));
 }
 
 #[test]

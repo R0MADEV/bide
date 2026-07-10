@@ -265,11 +265,7 @@ fn handler_for(step: &Step, task: &str, context: &str, agent: &AgentKind) -> Box
         ));
     }
     if is_implement_step(step, agent) {
-        return Box::new(ImplementStep::new(
-            task,
-            Box::new(ClaudeCodeImplementer),
-            Box::new(GitCli),
-        ));
+        return Box::new(ImplementStep::new(task, Box::new(ClaudeCodeImplementer)));
     }
     let input = format!("{task}\n\nRepository context:\n{context}");
     Box::new(AgentStep::new(&step.name, &input, agent.build()))
