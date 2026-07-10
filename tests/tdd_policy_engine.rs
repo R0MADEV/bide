@@ -41,3 +41,15 @@ fn allows_access_to_source_files() {
     let policy = Policy::default();
     assert!(policy.evaluate(&access("src/core/engine.rs")).is_allowed());
 }
+
+#[test]
+fn applies_extra_rules_from_config() {
+    let policy = Policy::with_rules(
+        vec!["terraform destroy".to_string()],
+        vec!["config/master.key".to_string()],
+    );
+    assert!(policy.evaluate(&command("terraform destroy -auto-approve")).is_denied());
+    assert!(policy.evaluate(&access("config/master.key")).is_denied());
+    // Built-in rules still apply.
+    assert!(policy.evaluate(&command("rm -rf /")).is_denied());
+}

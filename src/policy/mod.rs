@@ -33,31 +33,49 @@ impl Decision {
 
 /// Security rules applied before any tool runs. Lives outside the agents: an
 /// agent may recommend a command, but the Policy Engine decides if it is allowed.
-#[derive(Debug, Default)]
-pub struct Policy;
+/// Built-in rules always apply; a project can add its own via bide.toml.
+#[derive(Debug, Clone, Default)]
+pub struct Policy {
+    extra_denied: Vec<String>,
+    extra_secrets: Vec<String>,
+}
 
 impl Policy {
-    pub fn evaluate(&self, action: &Action) -> Decision {
-        match action {
-            Action::RunCommand(command) => evaluate_command(command),
-            Action::AccessPath(path) => evaluate_path(path),
+    pub fn with_rules(extra_denied: Vec<String>, extra_secrets: Vec<String>) -> Self {
+        Policy {
+            extra_denied,
+            extra_secrets,
         }
     }
-}
 
-fn evaluate_command(command: &str) -> Decision {
-    if let Some(reason) = command::denied_reason(command) {
-        return Decision::Deny(format!("destructive command ({reason})"));
+    pub fn evaluate(&self, action: &Action) -> Decision {
+        match action {
+            Action::RunCommand(command) => self.evaluate_command(command),
+            Action::AccessPath(path) => self.evaluate_path(path),
+        }
     }
-    if let Some(reason) = command::approval_reason(command) {
-        return Decision::RequireApproval(format!("needs confirmation ({reason})"));
-    }
-    Decision::Allow
-}
 
-fn evaluate_path(path: &Path) -> Decision {
-    match secret::secret_reason(path) {
-        Some(reason) => Decision::Deny(reason),
-        None => Decision::Allow,
+    fn evaluate_command(&self, command: &str) -> Decision {
+        if let Some(reason) = command::denied_reason(command) {
+            return Decision::Deny(format!("destructive command ({reason})"));
+        }
+        if let Some(pattern) = self.extra_denied.iter().find(|p| command.contains(p.as_str())) {
+            return Decision::Deny(format!("denied by config ({pattern})"));
+        }
+        if let Some(reason) = command::approval_reason(command) {
+            return Decision::RequireApproval(format!("needs confirmation ({reason})"));
+        }
+        Decision::Allow
+    }
+
+    fn evaluate_path(&self, path: &Path) -> Decision {
+        if let Some(reason) = secret::secret_reason(path) {
+            return Decision::Deny(reason);
+        }
+        let text = path.to_string_lossy();
+        if let Some(marker) = self.extra_secrets.iter().find(|m| text.contains(m.as_str())) {
+            return Decision::Deny(format!("secret path by config ({marker})"));
+        }
+        Decision::Allow
     }
 }

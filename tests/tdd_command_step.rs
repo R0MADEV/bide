@@ -1,5 +1,6 @@
 use bide::board::Blackboard;
 use bide::dispatch::StepHandler;
+use bide::policy::Policy;
 use bide::tools::{CommandResult, CommandStep, Shell};
 use bide::{Step, StepOutcome};
 
@@ -40,6 +41,7 @@ fn command_step_with_output(command: &str, succeed: bool, output: &str) -> Comma
             output: output.to_string(),
         }),
         Box::new(AlwaysApprove),
+        Policy::default(),
     )
 }
 

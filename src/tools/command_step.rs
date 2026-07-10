@@ -15,10 +15,15 @@ pub struct CommandStep {
 }
 
 impl CommandStep {
-    pub fn new(command: &str, shell: Box<dyn Shell>, approver: Box<dyn Approver>) -> Self {
+    pub fn new(
+        command: &str,
+        shell: Box<dyn Shell>,
+        approver: Box<dyn Approver>,
+        policy: Policy,
+    ) -> Self {
         CommandStep {
             command: command.to_string(),
-            policy: Policy,
+            policy,
             shell,
             approver,
         }

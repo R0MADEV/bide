@@ -10,6 +10,13 @@
 # model = "gpt-4o"
 # api_key_env = "OPENAI_API_KEY"
 
+# Optional. Extra security rules added ON TOP of the built-in ones (rm -rf,
+# .env, ssh keys, ...). A command containing any deny_commands string is
+# blocked; a path containing any secret_paths string is off limits.
+# [policy]
+# deny_commands = ["terraform destroy", "kubectl delete"]
+# secret_paths = ["config/master.key"]
+
 [workflow]
 # Retries allowed for a retry_from step before the run is marked Failed.
 max_retries = 2

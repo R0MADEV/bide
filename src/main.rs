@@ -8,6 +8,7 @@ use bide::doctor::{config_check, is_healthy, tool_check, ConfigState, Level};
 use bide::context::{build_context, CodeContext, ContextPack, LexisAsk};
 use bide::dispatch::{AutoGate, Control, Dispatcher, Gate, StepHandler, StepReport};
 use bide::git::{branch_name, commit_message, pr_title, Git, GitCli};
+use bide::policy::Policy;
 use bide::report::{save, RunRecord};
 use bide::tools::{Approver, ClaudeCodeImplementer, CommandStep, ImplementStep, ProcessShell};
 use bide::{run, Status, Step, Workflow};
@@ -103,7 +104,8 @@ fn run_task(task: &str, yes: bool) -> ExitCode {
     println!("context:\n{}\n", context.text);
     print_plan(&workflow);
 
-    let mut dispatcher = build_dispatcher(&workflow, task, &context.text, &agent);
+    let policy = policy_from_config();
+    let mut dispatcher = build_dispatcher(&workflow, task, &context.text, &agent, &policy);
     dispatcher.set_gate(make_gate(yes));
     let status = run(&workflow, &mut dispatcher);
 
@@ -248,20 +250,28 @@ fn build_dispatcher(
     task: &str,
     context: &str,
     agent: &AgentKind,
+    policy: &Policy,
 ) -> Dispatcher {
     let mut dispatcher = Dispatcher::new();
     for step in &workflow.steps {
-        dispatcher.register(&step.name, handler_for(step, task, context, agent));
+        dispatcher.register(&step.name, handler_for(step, task, context, agent, policy));
     }
     dispatcher
 }
 
-fn handler_for(step: &Step, task: &str, context: &str, agent: &AgentKind) -> Box<dyn StepHandler> {
+fn handler_for(
+    step: &Step,
+    task: &str,
+    context: &str,
+    agent: &AgentKind,
+    policy: &Policy,
+) -> Box<dyn StepHandler> {
     if let Some(command) = &step.command {
         return Box::new(CommandStep::new(
             command,
             Box::new(ProcessShell),
             Box::new(PromptApprover),
+            policy.clone(),
         ));
     }
     if is_implement_step(step, agent) {
@@ -275,6 +285,18 @@ fn handler_for(step: &Step, task: &str, context: &str, agent: &AgentKind) -> Box
 /// are opted in, so a stub run never tries to change files.
 fn is_implement_step(step: &Step, agent: &AgentKind) -> bool {
     step.name == IMPLEMENT_STEP && !agent.is_stub()
+}
+
+/// Built-in policy plus any extra rules from the [policy] section of bide.toml.
+fn policy_from_config() -> Policy {
+    let path = Path::new(CONFIG_PATH);
+    if !path.exists() {
+        return Policy::default();
+    }
+    match bide::config::load_policy(path) {
+        Ok(settings) => Policy::with_rules(settings.deny_commands, settings.secret_paths),
+        Err(_) => Policy::default(),
+    }
 }
 
 fn context_pack(task: &str) -> ContextPack {

@@ -1,5 +1,24 @@
-use bide::config::{parse, parse_agent, Provider};
+use bide::config::{parse, parse_agent, parse_policy, Provider};
 use bide::OnFailure;
+
+#[test]
+fn parses_a_policy_section() {
+    let input = r#"
+        [policy]
+        deny_commands = ["terraform destroy"]
+        secret_paths = ["config/master.key"]
+    "#;
+
+    let settings = parse_policy(input).expect("valid");
+    assert_eq!(settings.deny_commands, vec!["terraform destroy"]);
+    assert_eq!(settings.secret_paths, vec!["config/master.key"]);
+}
+
+#[test]
+fn no_policy_section_yields_empty_rules() {
+    let settings = parse_policy("[workflow]\nmax_retries = 0\n").expect("valid");
+    assert!(settings.deny_commands.is_empty());
+}
 
 #[test]
 fn parses_an_openai_agent_section() {
